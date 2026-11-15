@@ -10,12 +10,13 @@ Live tracker for the stocks in the iShares MSCI South Korea ETF (EWY).
 - Live price, today's % change, and the impact of each stock on EWY.
 - EWY price (with extended hours), the Korea basket move in USD, KOSPI, USD/KRW, and MU.
 - Top lifts and top drags on EWY.
-- KRX and US market status. Auto refresh every 20 seconds.
+- KRX and US market status. Auto refresh every 30 seconds.
 
 ## Files
 
 - `index.html` — the site.
-- `worker.js` — optional Cloudflare Worker data proxy. Use it if the free proxies are busy. Put its URL in the page **Settings**.
+- `.github/workflows/prices.yml` — GitHub Action. It gets the prices from Yahoo Finance about every 60 seconds on weekdays and saves them as `data.json` on the `data` branch. The page reads that file. No proxy is necessary.
+- `worker.js` — optional Cloudflare Worker data proxy. Not necessary. Use it only if you want second-by-second prices. Put its URL in the page **Settings**.
 
 ## Update the weights
 

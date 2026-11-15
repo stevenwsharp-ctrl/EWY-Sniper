@@ -144,7 +144,7 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
       <label>Refresh every (seconds)
         <input id="setRefresh" type="number" min="5" step="1">
       </label>
-      <label>Your data proxy URL (optional — for example your Cloudflare Worker: https://name.workers.dev/?url={url})
+      <label>Your data proxy URL (optional — not needed. Leave empty to use the saved prices from GitHub. For second-by-second prices, put your Cloudflare Worker here: https://name.workers.dev/?url={url})
         <input id="setProxy" placeholder="https://your-worker.workers.dev/?url={url}">
       </label>
       <label>Holdings and weights (one per line: ticker, name, weight %). Paste an updated list to change the weights.
@@ -159,7 +159,7 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
 
   <footer>
     <p id="asof"></p>
-    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance and can have a short delay. This page is for information only. It is not financial advice.</p>
+    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved about every minute on weekdays, so they can have a short delay. This page is for information only. It is not financial advice.</p>
   </footer>
 </main>
 
@@ -194,11 +194,17 @@ const DEFAULT_HOLDINGS = [
   ["267260.KS","HD Hyundai Electric",0.68]
 ];
 const MARKET = ["^KS11","KRW=X","MU"];
-const PUBLIC_PROXIES = [
-  "https://corsproxy.io/?url={url}",
-  "https://api.codetabs.com/v1/proxy?quest={url}",
-  "https://api.allorigins.win/raw?url={url}"
-];
+// Prices are saved every ~60 s by the GitHub Action ".github/workflows/prices.yml" to the "data" branch.
+function dataUrl(){
+  let owner = "stevenwsharp-ctrl", repo = "EWY-Sniper";
+  const h = location.hostname;
+  if (h.endsWith(".github.io")){
+    owner = h.split(".")[0];
+    const seg = location.pathname.split("/").filter(Boolean)[0];
+    if (seg && !seg.includes(".")) repo = seg;
+  }
+  return `https://raw.githubusercontent.com/${owner}/${repo}/data/data.json`;
+}
 
 // ---------- storage (safe) ----------
 const store = {
@@ -206,11 +212,10 @@ const store = {
   set(k, v){ try { localStorage.setItem("ewysniper:"+k, JSON.stringify(v)); } catch(e){} }
 };
 let settings = {
-  refresh: store.get("refresh", 20),
+  refresh: store.get("refresh", 30),
   proxy: store.get("proxy", ""),
   holdings: store.get("holdings", null) || DEFAULT_HOLDINGS
 };
-let goodProxy = store.get("goodProxy", null);
 
 // ---------- helpers ----------
 const $ = id => document.getElementById(id);
@@ -220,12 +225,7 @@ const cls = n => (n == null || !isFinite(n) || Math.abs(n) < 0.005) ? "flat" : (
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 function proxyList(){
-  const list = [];
-  if (settings.proxy) list.push(settings.proxy.trim());
-  if (goodProxy && !list.includes(goodProxy)) list.push(goodProxy);
-  PUBLIC_PROXIES.forEach(p => { if (!list.includes(p)) list.push(p); });
-  if (settings.proxy) { list.splice(list.indexOf(settings.proxy.trim()),1); list.unshift(settings.proxy.trim()); }
-  return list;
+  return settings.proxy ? [settings.proxy.trim()] : [];
 }
 function wrap(p, url){
   const e = encodeURIComponent(url);
@@ -244,9 +244,7 @@ async function fetchJSON(url){
     try {
       const r = await fetchWithTimeout(wrap(p, url), 9000);
       if (!r.ok) throw new Error("HTTP " + r.status);
-      const j = JSON.parse(await r.text());
-      if (goodProxy !== p) { goodProxy = p; store.set("goodProxy", p); }
-      return j;
+      return JSON.parse(await r.text());
     } catch(e){ lastErr = e; }
   }
   throw lastErr || new Error("No proxy worked");
@@ -308,6 +306,27 @@ async function getQuotes(symbols){
     }));
   }
   return out;
+}
+
+async function getSnapshot(){
+  const r = await fetchWithTimeout(dataUrl() + "?t=" + Date.now(), 10000);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  if (!j || !j.quotes) throw new Error("Bad data");
+  const quotes = {};
+  Object.keys(j.quotes).forEach(s => { quotes[s] = Object.assign({sym:s}, j.quotes[s]); });
+  return { quotes, ewy: quotes["EWY"] || null, time: new Date(j.updated) };
+}
+
+// Live (your own proxy, if set) first, then the saved snapshot.
+async function getData(syms){
+  if (settings.proxy){
+    try {
+      const [quotes, ewy] = await Promise.all([getQuotes(syms), getChart("EWY", true).catch(() => null)]);
+      if (Object.values(quotes).some(q => q && q.price != null)) return { quotes, ewy, time: new Date(), live: true };
+    } catch(e){}
+  }
+  return Object.assign(await getSnapshot(), { live: false });
 }
 
 // ---------- market clock ----------
@@ -391,10 +410,8 @@ async function refresh(){
   try {
     const hs = settings.holdings;
     const syms = hs.map(h => h[0]).concat(MARKET);
-    const [quotes, ewy] = await Promise.all([
-      getQuotes(syms),
-      getChart("EWY", true).catch(() => null)
-    ]);
+    const data = await getData(syms);
+    const quotes = data.quotes, ewy = data.ewy;
     const got = Object.values(quotes).filter(q => q && q.price != null).length;
     if (!got && !ewy) throw new Error("No data");
 
@@ -441,15 +458,24 @@ async function refresh(){
     renderMovers();
     render();
 
-    $("banner").style.display = "none";
-    $("dot").className = "dot live";
-    $("updated").textContent = "Updated " + new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
+    const ageMin = (Date.now() - data.time.getTime()) / 60000;
+    const t = data.time.toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
+    const b = $("banner");
+    if (ageMin > 20 && !data.live){
+      b.style.display = "block";
+      b.textContent = "Prices are from " + data.time.toLocaleString() + " (" + Math.round(ageMin) + " min ago). The price updater runs on GitHub every few minutes on weekdays. On weekends prices update less often.";
+      $("dot").className = "dot";
+    } else {
+      b.style.display = "none";
+      $("dot").className = "dot live";
+    }
+    $("updated").textContent = (data.live ? "Live " : "Prices ") + t + (data.live || ageMin < 1 ? "" : " · " + Math.round(ageMin) + " min ago");
   } catch(e){
     $("dot").className = "dot err";
     $("updated").textContent = "Data error";
     const b = $("banner");
     b.style.display = "block";
-    b.textContent = "Cannot get prices now. The free data proxies can be busy or blocked. Wait for the next refresh, or put your own proxy URL (for example your Cloudflare Worker) in Settings.";
+    b.textContent = "Cannot get prices now. The page tries again at the next refresh.";
   } finally {
     busy = false;
   }
