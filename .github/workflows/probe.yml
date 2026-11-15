@@ -1,0 +1,12 @@
+name: Probe
+on:
+  push:
+    paths: [".github/workflows/probe.yml"]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+          for u in "https://m.stock.naver.com/api/stock/005930/basic" "https://m.stock.naver.com/api/stock/005930/integration" "https://polling.finance.naver.com/api/realtime/domestic/stock/005930" "https://query1.finance.yahoo.com/v8/finance/chart/005930.KS?range=1d&interval=1m&includePrePost=true"; do
+            echo "=== $u"; curl -sS -m 20 -A "$UA" "$u" | head -c 2500; echo; done
