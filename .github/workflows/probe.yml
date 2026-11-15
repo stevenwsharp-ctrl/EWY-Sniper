@@ -2,10 +2,20 @@ name: Probe
 on:
   push:
     paths: [".github/workflows/probe.yml"]
+permissions:
+  contents: write
 jobs:
   p:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          for u in "https://polling.finance.naver.com/api/realtime/domestic/stock/005930,000660" "https://m.stock.naver.com/api/stock/005930/basic" "https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI"; do
-            echo "=== $u"; curl -sS -m 20 -D - -o /tmp/b -H "Origin: https://stevenwsharp-ctrl.github.io" -A "Mozilla/5.0" "$u" | grep -i "^HTTP\|access-control\|cache-control"; head -c 400 /tmp/b; echo; done
+          R="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/probe/x.json"
+          push(){ d=$(mktemp -d); cd $d; git init -q -b probe; git config user.name b; git config user.email b@b; echo "{\"v\":$1}" > x.json; git add .; git commit -qm p; git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" probe:probe; cd /; }
+          push 1; sleep 2
+          for v in 2 3 4; do
+            push $v; t0=$(date +%s)
+            for i in $(seq 1 40); do b=$(curl -s "$R?t=$(date +%s%N)"); [ "$b" = "{\"v\":$v}" ] && break; sleep 1; done
+            echo "v=$v seen after $(( $(date +%s)-t0 ))s body=$b"
+          done
+          curl -sI "$R?t=1" | grep -i "cache-control\|x-cache\|access-control"
+          git push -q "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" --delete probe || true
