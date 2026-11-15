@@ -1,13 +1,31 @@
 // EWY Sniper price fetcher. Runs in GitHub Actions (Node 20+).
 // Gets prices from Yahoo Finance on the server (no CORS problem) and writes data.json.
-// Each job updates data.json about every 60 seconds for ~5 minutes, every day (weekends too).
-import { readFileSync, writeFileSync } from "node:fs";
+// Each job runs ~5 h 40 min. It updates every 15 s while KRX or US markets are live, else every 60 s.
+// Each update is saved as out/s/<slot>.json (a new file name per 15 s slot, so the raw file cache cannot
+// give old data) and as out/data.json. The workflow starts the next job at the end.
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { getNews } from "./news.mjs";
 
-const OUT = process.argv[2] || "data.json";
-const LOOP_MS = Number(process.env.LOOP_MS || 285000);   // run time per job while a market is open
-const STEP_MS = Number(process.env.STEP_MS || 60000);    // time between updates
+const OUT_DIR = process.argv[2] || "out";
+const LOOP_MS = Number(process.env.LOOP_MS || 340 * 60000);  // run time per job
+const LIVE_STEP_MS = 15000;                                  // time between updates while a market is live
+const IDLE_STEP_MS = 60000;                                  // time between updates at other times
+const SLOT_MS = 15000;                                       // one file name per 15 s
+const KEEP_SLOTS = 40;
+mkdirSync(OUT_DIR + "/s", { recursive: true });
+
+function minutesIn(tz) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
+  const g = t => (p.find(x => x.type === t) || {}).value;
+  return { wd: g("weekday"), m: (parseInt(g("hour"), 10) % 24) * 60 + parseInt(g("minute"), 10) };
+}
+function marketLive() {
+  const k = minutesIn("Asia/Seoul"), u = minutesIn("America/New_York");
+  const krx = !["Sat", "Sun"].includes(k.wd) && k.m >= 480 && k.m < 1200;   // NXT pre 08:00 to NXT after 20:00 KST
+  const us = !["Sat", "Sun"].includes(u.wd) && u.m >= 240 && u.m < 1200;    // US pre-market 04:00 to after-hours 20:00 ET
+  return krx || us;
+}
 
 // Symbols: every Korean ticker in index.html, plus market cards and EWY.
 const html = readFileSync("index.html", "utf8");
@@ -102,13 +120,21 @@ async function snapshot() {
   return { updated: new Date().toISOString(), quotes, errors };
 }
 
+function save(snap) {
+  const body = JSON.stringify(snap);
+  writeFileSync(OUT_DIR + "/data.json", body);
+  writeFileSync(`${OUT_DIR}/s/${Math.floor(Date.now() / SLOT_MS)}.json`, body);
+  const files = readdirSync(OUT_DIR + "/s").sort((a, b) => parseInt(b) - parseInt(a));
+  files.slice(KEEP_SLOTS).forEach(f => rmSync(`${OUT_DIR}/s/${f}`));
+}
 function publish() {
-  // Push data.json to the "data" branch (one commit, history replaced each time).
+  // Push the out folder to the "data" branch (one commit, history replaced each time).
   if (!process.env.GITHUB_ACTIONS) return;
-  execSync(`bash .github/scripts/publish.sh "${OUT}"`, { stdio: "inherit" });
+  try { execSync(`bash .github/scripts/publish.sh "${OUT_DIR}"`, { stdio: "inherit" }); }
+  catch (e) { console.log("push failed: " + e.message); }
 }
 
-const NEWS_EVERY_MS = 4 * 60000;
+const NEWS_EVERY_MS = 55000;
 let news = { items: [], errors: [] }, newsAt = 0;
 async function refreshNews() {
   try { news = await getNews(HOLDINGS); newsAt = Date.now(); }
@@ -127,13 +153,11 @@ do {
   const ok = Object.keys(snap.quotes).length;
   console.log(`${snap.updated}: ${ok}/${SYMBOLS.length} quotes` + (snap.errors.length ? `; errors: ${snap.errors.slice(0, 5).join(" | ")}` : ""));
   if (ok > 0) {
-    writeFileSync(OUT, JSON.stringify(snap));
+    save(snap);
     publish();
-  } else if (n === 0) {
-    process.exitCode = 1;
   }
   n++;
-  const wait = STEP_MS - (Date.now() - t0);
+  const wait = (marketLive() ? LIVE_STEP_MS : IDLE_STEP_MS) - (Date.now() - t0);
   if (Date.now() + wait >= end) break;
   if (wait > 0) await sleep(wait);
 } while (true);

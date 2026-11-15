@@ -204,7 +204,7 @@ td.l .name{cursor:pointer}
     <p id="asof"></p>
     <p>"Pre / After" = the Nextrade (NXT) pre-market (08:00–08:50 KST) and after-market (15:30–20:00 KST) price, from Naver Finance, compared with the last KRX close.</p>
     <p>News comes from Google News and Yahoo Finance. "Major" stories are picked by keywords (for example plunge, earnings, tariff, probe, downgrade) and by the stock's weight in EWY. Click 🔔 to get a sound and a pop-up when a new major story comes in. Keep this tab open for alerts.</p>
-    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved about every minute, so they can have a short delay. This page is for information only. It is not financial advice.</p>
+    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved every 15 seconds while KRX or US markets are live and every minute at other times, so they can have a short delay. This page is for information only. It is not financial advice.</p>
   </footer>
 </main>
 <div id="toasts"></div>
@@ -249,7 +249,7 @@ function dataUrl(){
     const seg = location.pathname.split("/").filter(Boolean)[0];
     if (seg && !seg.includes(".")) repo = seg;
   }
-  return `https://raw.githubusercontent.com/${owner}/${repo}/data/data.json`;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/data/`;
 }
 
 // ---------- storage (safe) ----------
@@ -258,7 +258,7 @@ const store = {
   set(k, v){ try { localStorage.setItem("ewysniper:"+k, JSON.stringify(v)); } catch(e){} }
 };
 let settings = {
-  refresh: store.get("refresh", 30),
+  refresh: store.get("refresh2", 15),
   proxy: store.get("proxy", ""),
   holdings: store.get("holdings", null) || DEFAULT_HOLDINGS
 };
@@ -354,10 +354,25 @@ async function getQuotes(symbols){
   return out;
 }
 
+// The updater saves each update as s/<slot>.json, one name per 15 s. A new name is never in the
+// file cache, so the newest slot gives fresh data. data.json is the fallback (can be up to 5 min old).
+const SLOT_MS = 15000;
+let lastSlot = 0;
 async function getSnapshot(){
-  const r = await fetchWithTimeout(dataUrl() + "?t=" + Date.now(), 10000);
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  const j = await r.json();
+  const base = dataUrl();
+  const top = Math.floor((Date.now() - 3000) / SLOT_MS);
+  let j = null;
+  for (let s = top; s >= top - 10 && s >= lastSlot; s--){
+    try {
+      const r = await fetchWithTimeout(base + "s/" + s + ".json", 8000);
+      if (r.ok){ j = await r.json(); lastSlot = s; break; }
+    } catch(e){}
+  }
+  if (!j){
+    const r = await fetchWithTimeout(base + "data.json?t=" + Date.now(), 10000);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    j = await r.json();
+  }
   if (!j || !j.quotes) throw new Error("Bad data");
   const quotes = {};
   Object.keys(j.quotes).forEach(s => { quotes[s] = Object.assign({sym:s}, j.quotes[s]); });
@@ -655,9 +670,9 @@ async function refresh(){
     const ageMin = (Date.now() - data.time.getTime()) / 60000;
     const t = data.time.toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
     const b = $("banner");
-    if (ageMin > 20 && !data.live){
+    if (ageMin > 5 && !data.live){
       b.style.display = "block";
-      b.textContent = "Prices are from " + data.time.toLocaleString() + " (" + Math.round(ageMin) + " min ago). The price updater on GitHub can start late. The page tries again at the next refresh.";
+      b.textContent = "Prices are from " + data.time.toLocaleString() + " (" + Math.round(ageMin) + " min ago). The price updater on GitHub can restart for about a minute. The page tries again at the next refresh.";
       $("dot").className = "dot";
     } else {
       b.style.display = "none";
@@ -706,7 +721,7 @@ $("saveBtn").onclick = () => {
   settings.refresh = Math.max(5, parseInt($("setRefresh").value, 10) || 20);
   settings.proxy = $("setProxy").value.trim();
   settings.holdings = h;
-  store.set("refresh", settings.refresh); store.set("proxy", settings.proxy); store.set("holdings", h);
+  store.set("refresh2", settings.refresh); store.set("proxy", settings.proxy); store.set("holdings", h);
   lastPrice = {};
   fillSettings(); schedule(); refresh();
 };

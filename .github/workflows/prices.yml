@@ -1,8 +1,10 @@
 name: Update prices
 
+# One job runs ~5 h 40 min and then starts the next one, so prices update all the time.
+# The hourly schedule restarts it if the chain stops. A newer run replaces an older one.
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -10,21 +12,27 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: prices
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - name: Get prices and publish data.json
+          node-version: 22
+      - name: Get prices and news, publish to the data branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/scripts/fetch-prices.mjs data.json
+        run: node .github/scripts/fetch-prices.mjs out
+      - name: Start the next run
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run prices.yml --ref main -R "$GITHUB_REPOSITORY"
