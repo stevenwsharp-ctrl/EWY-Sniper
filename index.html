@@ -64,6 +64,30 @@ summary{cursor:pointer;font-weight:600}
 .set textarea{min-height:140px}
 .row{display:flex;gap:8px;flex-wrap:wrap}
 footer{color:var(--mute);font-size:12px;margin-top:16px}
+#alertBtn.on{color:var(--warn);border-color:var(--warn)}
+.newscard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.newshead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.newshead .lbl{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.seg button{padding:3px 9px;font-size:12px}.seg button.act{border-color:var(--accent);color:var(--accent)}
+.nlist{max-height:440px;overflow-y:auto}
+.nitem{padding:8px 4px;border-top:1px solid var(--line)}
+.nitem:first-child{border-top:0}
+.nitem a{color:var(--text);text-decoration:none;font-weight:600}
+.nitem a:hover{color:var(--accent)}
+.nitem.major{border-left:3px solid var(--down);padding-left:8px;background:rgba(239,68,68,.05)}
+.nitem.fresh{animation:fresh 3s}
+@keyframes fresh{from{background:rgba(245,158,11,.3)}to{background:transparent}}
+.nmeta{color:var(--mute);font-size:12px;margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.badge{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.5px;padding:1px 5px;border-radius:4px;background:var(--down);color:#fff;margin-right:6px;vertical-align:2px}
+.chip{font-size:11px;padding:1px 6px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;color:var(--text)}
+.chip:hover{border-color:var(--accent)}
+.ncount{font-size:11px;margin-left:6px;padding:0 5px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);cursor:pointer}
+.ncount.maj{color:#fff;background:var(--down);border-color:var(--down)}
+td.l .name{cursor:pointer}
+#toasts{position:fixed;right:14px;bottom:14px;z-index:20;display:grid;gap:8px;max-width:380px}
+.toast{background:#2a1214;border:1px solid var(--down);border-radius:10px;padding:10px 12px;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+.toast a{color:#fff;font-weight:600;text-decoration:none}
+.toast .x{float:right;cursor:pointer;color:var(--mute);margin-left:8px}
 @media (max-width:600px){.movers{grid-template-columns:1fr}.card .big{font-size:20px}h1{font-size:18px}}
 </style>
 </head>
@@ -74,6 +98,7 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
   <span class="pill" id="usPill">US —</span>
   <span class="spacer"></span>
   <span class="pill"><span class="dot" id="dot"></span><span id="updated">Loading…</span></span>
+  <button id="alertBtn" title="Sound alert for major news">🔕 Alerts off</button>
   <button id="refreshBtn" title="Refresh now">↻</button>
 </header>
 
@@ -119,6 +144,17 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
     <div class="card"><div class="lbl">Top drags on EWY</div><ol id="drags"></ol></div>
   </section>
 
+  <section class="newscard">
+    <div class="newshead">
+      <span class="lbl">News</span>
+      <span class="seg"><button id="nAll">All</button> <button id="nMajor">Major only</button></span>
+      <span id="nFilter"></span>
+      <span class="spacer"></span>
+      <span class="tick" id="nUpdated"></span>
+    </div>
+    <div class="nlist" id="news"><div class="tick">Loading news…</div></div>
+  </section>
+
   <div class="tools">
     <input id="search" placeholder="Filter by name or ticker…">
   </div>
@@ -159,9 +195,11 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
 
   <footer>
     <p id="asof"></p>
+    <p>News comes from Google News and Yahoo Finance. "Major" stories are picked by keywords (for example plunge, earnings, tariff, probe, downgrade) and by the stock's weight in EWY. Click 🔔 to get a sound and a pop-up when a new major story comes in. Keep this tab open for alerts.</p>
     <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved about every minute, so they can have a short delay. This page is for information only. It is not financial advice.</p>
   </footer>
 </main>
+<div id="toasts"></div>
 
 <script>
 (() => {
@@ -315,7 +353,7 @@ async function getSnapshot(){
   if (!j || !j.quotes) throw new Error("Bad data");
   const quotes = {};
   Object.keys(j.quotes).forEach(s => { quotes[s] = Object.assign({sym:s}, j.quotes[s]); });
-  return { quotes, ewy: quotes["EWY"] || null, time: new Date(j.updated) };
+  return { quotes, ewy: quotes["EWY"] || null, time: new Date(j.updated), news: j.news || [], newsTime: j.newsUpdated ? new Date(j.newsUpdated) : null };
 }
 
 // Live (your own proxy, if set) first, then the saved snapshot.
@@ -323,7 +361,10 @@ async function getData(syms){
   if (settings.proxy){
     try {
       const [quotes, ewy] = await Promise.all([getQuotes(syms), getChart("EWY", true).catch(() => null)]);
-      if (Object.values(quotes).some(q => q && q.price != null)) return { quotes, ewy, time: new Date(), live: true };
+      if (Object.values(quotes).some(q => q && q.price != null)){
+        const snap = await getSnapshot().catch(() => ({}));
+        return { quotes, ewy, time: new Date(), live: true, news: snap.news, newsTime: snap.newsTime };
+      }
     } catch(e){}
   }
   return Object.assign(await getSnapshot(), { live: false });
@@ -375,7 +416,7 @@ function render(){
     const flash = (old != null && r.price != null && old !== r.price) ? (r.price > old ? "flashup" : "flashdown") : "";
     return `<tr class="${flash}">
       <td class="l">${r.rank}</td>
-      <td class="l"><div class="name">${esc(r.name)}</div><div class="tick">${esc(r.sym.replace(".KS"," · KRX"))}</div></td>
+      <td class="l"><div class="name" data-sym="${esc(r.sym)}" title="Show news for this stock">${esc(r.name)}${newsBadge(r.sym)}</div><div class="tick">${esc(r.sym.replace(".KS"," · KRX"))}</div></td>
       <td class="wcell"><div class="wbar"><div class="track"><div class="fill" style="width:${(r.weight/maxW*100).toFixed(1)}%"></div></div><span class="wtag">${fmt(r.weight)}%</span></div></td>
       <td>${r.liveWeight != null ? fmt(r.liveWeight) + "%" : "—"}</td>
       <td>${r.price != null ? fmt(r.price, 0) : "—"}</td>
@@ -399,6 +440,121 @@ function renderMovers(){
   $("lifts").innerHTML = lifts.length ? lifts.map(li).join("") : "<li class='flat'>None now</li>";
   $("drags").innerHTML = drags.length ? drags.map(li).join("") : "<li class='flat'>None now</li>";
 }
+
+// ---------- news + alerts ----------
+let news = [], newsTime = null, newsFilter = null, majorOnly = store.get("majorOnly", false);
+let alertsOn = store.get("alerts", false), newsLoaded = false, audio = null, unread = 0;
+const seen = new Set(store.get("seenNews", []));
+const freshIds = new Set();
+const baseTitle = document.title;
+
+function ago(t){
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (m < 1) return "now";
+  if (m < 60) return m + " min ago";
+  const h = Math.floor(m / 60);
+  return h < 24 ? h + " h ago" : Math.floor(h / 24) + " d ago";
+}
+function safeLink(u){ return /^https?:\/\//i.test(u || "") ? u : "#"; }
+function rowOf(sym){ return rows.find(r => r.sym === sym); }
+function nameOf(sym){ const r = rowOf(sym); return r ? r.name : sym.replace(".KS",""); }
+function newsBadge(sym){
+  const day = news.filter(n => n.tickers.includes(sym) && Date.now() - n.time < 24*3600e3);
+  if (!day.length) return "";
+  const maj = day.some(n => n.major);
+  return `<span class="ncount${maj ? " maj" : ""}" title="${day.length} news in 24 h${maj ? ", major story" : ""}">📰 ${day.length}</span>`;
+}
+function chipHtml(sym){
+  const r = rowOf(sym);
+  const extra = r ? ` ${fmt(r.weight,1)}%` + (r.chg != null ? ` <span class="${cls(r.chg)}">${pct(r.chg,1)}</span>` : "") : "";
+  return `<span class="chip" data-sym="${esc(sym)}">${esc(nameOf(sym))}${extra}</span>`;
+}
+function renderNews(){
+  $("nAll").classList.toggle("act", !majorOnly);
+  $("nMajor").classList.toggle("act", majorOnly);
+  $("nFilter").innerHTML = newsFilter ? `<span class="chip" id="nClear">${esc(nameOf(newsFilter))} ✕</span>` : "";
+  $("nUpdated").textContent = newsTime ? "News checked " + ago(newsTime.getTime()) : "";
+  const list = news.filter(n => (!majorOnly || n.major) && (!newsFilter || n.tickers.includes(newsFilter))).slice(0, 60);
+  $("news").innerHTML = list.length ? list.map(n => `<div class="nitem${n.major ? " major" : ""}${freshIds.has(n.id) ? " fresh" : ""}">
+      ${n.major ? '<span class="badge">MAJOR</span>' : ""}<a href="${esc(safeLink(n.link))}" target="_blank" rel="noopener">${esc(n.title)}</a>
+      <div class="nmeta"><span>${esc(n.source)}</span><span>· ${ago(n.time)}</span>${n.tickers.map(chipHtml).join("")}${n.market && !n.tickers.length ? '<span class="chip">Korea market</span>' : ""}</div>
+    </div>`).join("") : `<div class="tick">No ${majorOnly ? "major " : ""}news${newsFilter ? " for " + esc(nameOf(newsFilter)) : ""} in the last 48 hours.</div>`;
+  freshIds.clear();
+}
+
+function beep(){
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume();
+    const t = audio.currentTime;
+    [[880,0],[660,0.18],[880,0.36]].forEach(([f,d]) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "square"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t+d); g.gain.exponentialRampToValueAtTime(0.15, t+d+0.02); g.gain.exponentialRampToValueAtTime(0.0001, t+d+0.16);
+      o.connect(g).connect(audio.destination); o.start(t+d); o.stop(t+d+0.17);
+    });
+  } catch(e){}
+}
+function toast(n){
+  const d = document.createElement("div");
+  d.className = "toast";
+  d.innerHTML = `<span class="x">✕</span><span class="badge">MAJOR</span><a href="${esc(safeLink(n.link))}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="nmeta">${esc(n.source)} · ${n.tickers.map(s => esc(nameOf(s))).join(", ") || "Korea market"}</div>`;
+  d.querySelector(".x").onclick = () => d.remove();
+  $("toasts").prepend(d);
+  setTimeout(() => d.remove(), 60000);
+  while ($("toasts").children.length > 4) $("toasts").lastChild.remove();
+}
+function notify(n){
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const x = new Notification("EWY Sniper — major news", { body: n.title, tag: n.id });
+    x.onclick = () => { window.open(safeLink(n.link), "_blank"); x.close(); };
+  } catch(e){}
+}
+function checkAlerts(){
+  const fresh = [];
+  news.forEach(n => {
+    if (seen.has(n.id)) return;
+    seen.add(n.id);
+    freshIds.add(n.id);
+    // On first load, alert only on major stories from the last 30 minutes.
+    if (n.major && (newsLoaded || Date.now() - n.time < 30*60000)) fresh.push(n);
+  });
+  if (!newsLoaded) freshIds.clear();
+  newsLoaded = true;
+  store.set("seenNews", [...seen].slice(-400));
+  if (!fresh.length || !alertsOn) return;
+  beep();
+  fresh.slice(0, 3).forEach(n => { toast(n); notify(n); });
+  if (document.hidden){ unread += fresh.length; document.title = `(${unread}) ⚠ ${baseTitle}`; }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden){ unread = 0; document.title = baseTitle; } });
+function setAlertBtn(){
+  const b = $("alertBtn");
+  b.textContent = alertsOn ? "🔔 Alerts on" : "🔕 Alerts off";
+  b.classList.toggle("on", alertsOn);
+}
+$("alertBtn").onclick = () => {
+  alertsOn = !alertsOn;
+  store.set("alerts", alertsOn);
+  setAlertBtn();
+  if (alertsOn){
+    beep();  // also unlocks sound in the browser
+    try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch(e){}
+  }
+};
+// Browsers block sound until the user clicks the page. Unlock it on the first click.
+document.addEventListener("click", () => { if (alertsOn && !audio){ try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} } }, { once: true });
+$("nAll").onclick = () => { majorOnly = false; store.set("majorOnly", false); renderNews(); };
+$("nMajor").onclick = () => { majorOnly = true; store.set("majorOnly", true); renderNews(); };
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-sym]");
+  if (el && (el.classList.contains("chip") || el.classList.contains("name") || el.closest(".name"))){
+    newsFilter = el.dataset.sym || el.closest("[data-sym]").dataset.sym;
+    renderNews();
+    $("news").closest(".newscard").scrollIntoView({behavior:"smooth", block:"start"});
+  } else if (e.target.id === "nClear"){ newsFilter = null; renderNews(); }
+});
 
 // ---------- main loop ----------
 let busy = false, timer = null;
@@ -455,8 +611,10 @@ async function refresh(){
     $("coverage").textContent = fmt(sumW,1) + "%";
     $("breadth").innerHTML = `${hs.length} stocks · <span class="up">${ups} up</span> · <span class="down">${downs} down</span>`;
 
+    if (Array.isArray(data.news)){ news = data.news; newsTime = data.newsTime; checkAlerts(); }
     renderMovers();
     render();
+    renderNews();
 
     const ageMin = (Date.now() - data.time.getTime()) / 60000;
     const t = data.time.toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
@@ -533,6 +691,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) refr
 
 $("asof").textContent = WEIGHTS_ASOF;
 fillSettings();
+setAlertBtn();
 updateClocks();
 setInterval(updateClocks, 30000);
 schedule();

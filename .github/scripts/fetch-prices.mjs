@@ -3,6 +3,7 @@
 // Each job updates data.json about every 60 seconds for ~5 minutes, every day (weekends too).
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { getNews } from "./news.mjs";
 
 const OUT = process.argv[2] || "data.json";
 const LOOP_MS = Number(process.env.LOOP_MS || 285000);   // run time per job while a market is open
@@ -11,6 +12,7 @@ const STEP_MS = Number(process.env.STEP_MS || 60000);    // time between updates
 // Symbols: every Korean ticker in index.html, plus market cards and EWY.
 const html = readFileSync("index.html", "utf8");
 const korean = [...new Set([...html.matchAll(/"(\d{6}\.K[SQ])"/g)].map(m => m[1]))];
+const HOLDINGS = [...html.matchAll(/\["(\d{6}\.K[SQ])","([^"]+)",([\d.]+)\]/g)].map(m => [m[1], m[2], Number(m[3])]);
 const MARKET = ["^KS11", "KRW=X", "MU"];
 const SYMBOLS = [...korean, ...MARKET, "EWY"];
 
@@ -69,11 +71,22 @@ function publish() {
   execSync(`bash .github/scripts/publish.sh "${OUT}"`, { stdio: "inherit" });
 }
 
+const NEWS_EVERY_MS = 4 * 60000;
+let news = { items: [], errors: [] }, newsAt = 0;
+async function refreshNews() {
+  try { news = await getNews(HOLDINGS); newsAt = Date.now(); }
+  catch (e) { news.errors = [e.message]; }
+  console.log(`news: ${news.items.length} items, ${news.items.filter(x => x.major).length} major` + (news.errors.length ? `; errors: ${news.errors.slice(0, 3).join(" | ")}` : ""));
+}
+
 const end = Date.now() + LOOP_MS;
 let n = 0;
 do {
   const t0 = Date.now();
+  if (Date.now() - newsAt > NEWS_EVERY_MS) await refreshNews();
   const snap = await snapshot();
+  snap.news = news.items;
+  snap.newsUpdated = newsAt ? new Date(newsAt).toISOString() : null;
   const ok = Object.keys(snap.quotes).length;
   console.log(`${snap.updated}: ${ok}/${SYMBOLS.length} quotes` + (snap.errors.length ? `; errors: ${snap.errors.slice(0, 5).join(" | ")}` : ""));
   if (ok > 0) {

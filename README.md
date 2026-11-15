@@ -8,6 +8,7 @@ Live tracker for the stocks in the iShares MSCI South Korea ETF (EWY).
 
 - The top 22 EWY stocks (about 82% of the fund), each with its **% of EWY** weight.
 - Live price, today's % change, and the impact of each stock on EWY.
+- News for each stock (Google News and Yahoo Finance), with major stories marked. Click 🔔 for a sound alert and pop-up on new major stories.
 - EWY price (with extended hours), the Korea basket move in USD, KOSPI, USD/KRW, and MU.
 - Top lifts and top drags on EWY.
 - KRX and US market status. Auto refresh every 30 seconds.
