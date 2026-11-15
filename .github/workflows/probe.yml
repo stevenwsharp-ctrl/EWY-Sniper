@@ -1,0 +1,11 @@
+name: Probe
+on:
+  push:
+    paths: [".github/workflows/probe.yml"]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in "https://polling.finance.naver.com/api/realtime/domestic/stock/005930,000660" "https://m.stock.naver.com/api/stock/005930/basic" "https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI"; do
+            echo "=== $u"; curl -sS -m 20 -D - -o /tmp/b -H "Origin: https://stevenwsharp-ctrl.github.io" -A "Mozilla/5.0" "$u" | grep -i "^HTTP\|access-control\|cache-control"; head -c 400 /tmp/b; echo; done
