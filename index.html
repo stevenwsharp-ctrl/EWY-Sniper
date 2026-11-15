@@ -159,7 +159,7 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
 
   <footer>
     <p id="asof"></p>
-    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved about every minute on weekdays, so they can have a short delay. This page is for information only. It is not financial advice.</p>
+    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved about every minute, so they can have a short delay. This page is for information only. It is not financial advice.</p>
   </footer>
 </main>
 
@@ -463,7 +463,7 @@ async function refresh(){
     const b = $("banner");
     if (ageMin > 20 && !data.live){
       b.style.display = "block";
-      b.textContent = "Prices are from " + data.time.toLocaleString() + " (" + Math.round(ageMin) + " min ago). The price updater runs on GitHub every few minutes on weekdays. On weekends prices update less often.";
+      b.textContent = "Prices are from " + data.time.toLocaleString() + " (" + Math.round(ageMin) + " min ago). The price updater on GitHub can start late. The page tries again at the next refresh.";
       $("dot").className = "dot";
     } else {
       b.style.display = "none";

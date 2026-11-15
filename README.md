@@ -15,7 +15,7 @@ Live tracker for the stocks in the iShares MSCI South Korea ETF (EWY).
 ## Files
 
 - `index.html` — the site.
-- `.github/workflows/prices.yml` — GitHub Action. It gets the prices from Yahoo Finance about every 60 seconds on weekdays and saves them as `data.json` on the `data` branch. The page reads that file. No proxy is necessary.
+- `.github/workflows/prices.yml` — GitHub Action. It gets the prices from Yahoo Finance about every 60 seconds, every day and saves them as `data.json` on the `data` branch. The page reads that file. No proxy is necessary.
 - `worker.js` — optional Cloudflare Worker data proxy. Not necessary. Use it only if you want second-by-second prices. Put its URL in the page **Settings**.
 
 ## Update the weights

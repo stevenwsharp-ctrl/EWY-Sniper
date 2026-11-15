@@ -1,6 +1,6 @@
 // EWY Sniper price fetcher. Runs in GitHub Actions (Node 20+).
 // Gets prices from Yahoo Finance on the server (no CORS problem) and writes data.json.
-// While KRX or US markets are open, it updates data.json about every 60 seconds for ~5 minutes.
+// Each job updates data.json about every 60 seconds for ~5 minutes, every day (weekends too).
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
@@ -63,17 +63,6 @@ async function snapshot() {
   return { updated: new Date().toISOString(), quotes, errors };
 }
 
-function marketOpen() {
-  // KRX (23:00–11:00 UTC) and US pre/regular/after hours (08:00–01:00 UTC) together cover the full
-  // weekday. Closed from Saturday 01:00 UTC (US after-hours end) to Sunday 23:00 UTC (KRX Monday pre-open).
-  const now = new Date();
-  const day = now.getUTCDay();
-  const h = now.getUTCHours();
-  if (day === 6 && h >= 1) return false;
-  if (day === 0 && h < 23) return false;
-  return true;
-}
-
 function publish() {
   // Push data.json to the "data" branch (one commit, history replaced each time).
   if (!process.env.GITHUB_ACTIONS) return;
@@ -94,7 +83,6 @@ do {
     process.exitCode = 1;
   }
   n++;
-  if (!marketOpen()) break;
   const wait = STEP_MS - (Date.now() - t0);
   if (Date.now() + wait >= end) break;
   if (wait > 0) await sleep(wait);
