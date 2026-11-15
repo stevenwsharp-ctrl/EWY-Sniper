@@ -47,6 +47,9 @@ const MEDIUM = [
   "foreign investors", "sell-off", "selloff", "rally", "battery", "ev ", "semiconductor"
 ];
 
+// Headlines that name a stock but are not about it (arenas, sports teams, sponsorships).
+const NOISE = /kia (forum|center|centre|oval|arena|tigers|open)|samsung (lions|bluewings|stadium)|hyundai (a-league|cup)|naver webtoon(?! .*shares)/i;
+
 function decode(s) {
   return String(s || "")
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
@@ -132,6 +135,7 @@ export async function getNews(holdings) {
   const byKey = new Map();
   for (const it of raw) {
     if (!it.title || !it.link || !it.time || now - it.time > MAX_AGE_H * 3600e3) continue;
+    if (NOISE.test(it.title)) continue;
     let tickers = matchTickers(it.title, holdings);
     if (!tickers.length && it.hint) tickers = [it.hint];
     const isMarket = !tickers.length && /kospi|korea|won|ewy/i.test(it.title);
