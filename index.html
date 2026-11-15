@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EWY Sniper</title>
+<meta name="description" content="Live tracker for the stocks in the iShares MSCI South Korea ETF (EWY), with each stock's % weight in EWY.">
+<style>
+:root{
+  --bg:#0b0e13;--panel:#131820;--panel2:#1a212c;--line:#253041;--text:#e6edf6;--mute:#8a97a8;
+  --up:#22c55e;--down:#ef4444;--accent:#38bdf8;--warn:#f59e0b;--bar:#2563eb;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+header{position:sticky;top:0;z-index:5;background:rgba(11,14,19,.95);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:20px;margin:0;letter-spacing:.5px}
+h1 span{color:var(--accent)}
+.pill{font-size:12px;padding:3px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);white-space:nowrap}
+.pill.open{color:var(--up);border-color:rgba(34,197,94,.4)}
+.pill.ext{color:var(--warn);border-color:rgba(245,158,11,.4)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mute);margin-right:6px;vertical-align:middle}
+.dot.live{background:var(--up);box-shadow:0 0 8px var(--up)}
+.dot.err{background:var(--down)}
+.spacer{flex:1}
+button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}
+main{max-width:1200px;margin:0 auto;padding:12px 16px 40px}
+.banner{display:none;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.5);color:#fecaca;padding:10px 12px;border-radius:10px;margin-bottom:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.card .lbl{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.card .big{font-size:24px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.card .sub{font-size:13px;color:var(--mute);margin-top:2px;font-variant-numeric:tabular-nums}
+.card.hero{border-color:rgba(56,189,248,.5)}
+.up{color:var(--up)}.down{color:var(--down)}.flat{color:var(--mute)}
+.movers{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.movers .card ol{margin:6px 0 0;padding-left:18px}
+.movers li{margin:2px 0;font-variant-numeric:tabular-nums}
+.tools{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.tools input{flex:1;min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 10px;font:inherit}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;background:var(--panel2);color:var(--mute);font-weight:600;font-size:12px;cursor:pointer;user-select:none}
+th.l,td.l{text-align:left}
+th.sorted{color:var(--accent)}
+tr:hover td{background:rgba(255,255,255,.02)}
+.name{font-weight:600}
+.tick{color:var(--mute);font-size:12px}
+.wcell{min-width:130px}
+.wbar{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.wbar .track{width:70px;height:8px;background:var(--panel2);border-radius:4px;overflow:hidden}
+.wbar .fill{height:100%;background:var(--bar)}
+.wtag{display:inline-block;background:rgba(37,99,235,.18);border:1px solid rgba(37,99,235,.5);color:#bfdbfe;border-radius:6px;padding:1px 6px;font-weight:700}
+.flashup{animation:fu 1.2s}.flashdown{animation:fd 1.2s}
+@keyframes fu{from{background:rgba(34,197,94,.35)}to{background:transparent}}
+@keyframes fd{from{background:rgba(239,68,68,.35)}to{background:transparent}}
+details{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+summary{cursor:pointer;font-weight:600}
+.set{display:grid;gap:10px;margin-top:10px}
+.set label{display:grid;gap:4px;color:var(--mute);font-size:12px}
+.set input,.set textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px;font:13px ui-monospace,Menlo,Consolas,monospace}
+.set textarea{min-height:140px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+footer{color:var(--mute);font-size:12px;margin-top:16px}
+@media (max-width:600px){.movers{grid-template-columns:1fr}.card .big{font-size:20px}h1{font-size:18px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>EWY <span>Sniper</span></h1>
+  <span class="pill" id="krxPill">KRX —</span>
+  <span class="pill" id="usPill">US —</span>
+  <span class="spacer"></span>
+  <span class="pill"><span class="dot" id="dot"></span><span id="updated">Loading…</span></span>
+  <button id="refreshBtn" title="Refresh now">↻</button>
+</header>
+
+<main>
+  <div class="banner" id="banner"></div>
+
+  <section class="cards">
+    <div class="card hero">
+      <div class="lbl">EWY</div>
+      <div class="big" id="ewyPrice">—</div>
+      <div class="sub" id="ewyChg">—</div>
+      <div class="sub" id="ewyExt"></div>
+    </div>
+    <div class="card hero">
+      <div class="lbl">Korea basket → EWY (USD)</div>
+      <div class="big" id="basketUsd">—</div>
+      <div class="sub" id="basketKrw">—</div>
+    </div>
+    <div class="card">
+      <div class="lbl">KOSPI</div>
+      <div class="big" id="kospi">—</div>
+      <div class="sub" id="kospiChg">—</div>
+    </div>
+    <div class="card">
+      <div class="lbl">USD / KRW</div>
+      <div class="big" id="fx">—</div>
+      <div class="sub" id="fxChg">—</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Memory proxy (MU)</div>
+      <div class="big" id="mu">—</div>
+      <div class="sub" id="muChg">—</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Coverage of EWY</div>
+      <div class="big" id="coverage">—</div>
+      <div class="sub" id="breadth">—</div>
+    </div>
+  </section>
+
+  <section class="movers">
+    <div class="card"><div class="lbl">Top lifts to EWY</div><ol id="lifts"></ol></div>
+    <div class="card"><div class="lbl">Top drags on EWY</div><ol id="drags"></ol></div>
+  </section>
+
+  <div class="tools">
+    <input id="search" placeholder="Filter by name or ticker…">
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th class="l" data-k="rank">#</th>
+        <th class="l" data-k="name">Stock</th>
+        <th data-k="weight">% of EWY</th>
+        <th data-k="liveWeight">Live % of EWY</th>
+        <th data-k="price">Price (₩)</th>
+        <th data-k="chg">Today</th>
+        <th data-k="contrib">EWY impact</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <details id="settings">
+    <summary>Settings</summary>
+    <div class="set">
+      <label>Refresh every (seconds)
+        <input id="setRefresh" type="number" min="5" step="1">
+      </label>
+      <label>Your data proxy URL (optional — for example your Cloudflare Worker: https://name.workers.dev/?url={url})
+        <input id="setProxy" placeholder="https://your-worker.workers.dev/?url={url}">
+      </label>
+      <label>Holdings and weights (one per line: ticker, name, weight %). Paste an updated list to change the weights.
+        <textarea id="setHoldings"></textarea>
+      </label>
+      <div class="row">
+        <button id="saveBtn">Save</button>
+        <button id="resetBtn">Reset to default list</button>
+      </div>
+    </div>
+  </details>
+
+  <footer>
+    <p id="asof"></p>
+    <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance and can have a short delay. This page is for information only. It is not financial advice.</p>
+  </footer>
+</main>
+
+<script>
+(() => {
+"use strict";
+
+// Default weights: % of EWY net assets (rolled-forward weights, May 31 2026 filing). Edit in Settings.
+const WEIGHTS_ASOF = "Default weights: EWY holdings, May 31, 2026 filing, rolled forward (source: chartrow.com). Paste a new list in Settings to update.";
+const DEFAULT_HOLDINGS = [
+  ["000660.KS","SK hynix",31.05],
+  ["005930.KS","Samsung Electronics",24.09],
+  ["009150.KS","Samsung Electro-Mechanics",3.45],
+  ["402340.KS","SK Square",3.10],
+  ["005380.KS","Hyundai Motor",3.02],
+  ["105560.KS","KB Financial Group",1.40],
+  ["012330.KS","Hyundai Mobis",1.20],
+  ["034020.KS","Doosan Enerbility",1.20],
+  ["006400.KS","Samsung SDI",1.10],
+  ["012450.KS","Hanwha Aerospace",1.02],
+  ["000270.KS","Kia",1.02],
+  ["055550.KS","Shinhan Financial Group",1.00],
+  ["028260.KS","Samsung C&T",1.00],
+  ["066570.KS","LG Electronics",0.97],
+  ["032830.KS","Samsung Life Insurance",0.91],
+  ["035420.KS","NAVER",0.86],
+  ["086790.KS","Hana Financial Group",0.84],
+  ["005490.KS","POSCO Holdings",0.83],
+  ["068270.KS","Celltrion",0.79],
+  ["034730.KS","SK Inc.",0.76],
+  ["329180.KS","HD Hyundai Heavy Industries",0.72],
+  ["267260.KS","HD Hyundai Electric",0.68]
+];
+const MARKET = ["^KS11","KRW=X","MU"];
+const PUBLIC_PROXIES = [
+  "https://corsproxy.io/?url={url}",
+  "https://api.codetabs.com/v1/proxy?quest={url}",
+  "https://api.allorigins.win/raw?url={url}"
+];
+
+// ---------- storage (safe) ----------
+const store = {
+  get(k, d){ try { const v = localStorage.getItem("ewysniper:"+k); return v == null ? d : JSON.parse(v); } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem("ewysniper:"+k, JSON.stringify(v)); } catch(e){} }
+};
+let settings = {
+  refresh: store.get("refresh", 20),
+  proxy: store.get("proxy", ""),
+  holdings: store.get("holdings", null) || DEFAULT_HOLDINGS
+};
+let goodProxy = store.get("goodProxy", null);
+
+// ---------- helpers ----------
+const $ = id => document.getElementById(id);
+const fmt = (n, d=2) => (n == null || !isFinite(n)) ? "—" : n.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct = (n, d=2) => (n == null || !isFinite(n)) ? "—" : (n>0?"+":"") + n.toFixed(d) + "%";
+const cls = n => (n == null || !isFinite(n) || Math.abs(n) < 0.005) ? "flat" : (n > 0 ? "up" : "down");
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function proxyList(){
+  const list = [];
+  if (settings.proxy) list.push(settings.proxy.trim());
+  if (goodProxy && !list.includes(goodProxy)) list.push(goodProxy);
+  PUBLIC_PROXIES.forEach(p => { if (!list.includes(p)) list.push(p); });
+  if (settings.proxy) { list.splice(list.indexOf(settings.proxy.trim()),1); list.unshift(settings.proxy.trim()); }
+  return list;
+}
+function wrap(p, url){
+  const e = encodeURIComponent(url);
+  if (p.includes("{url}")) return p.replace("{url}", e);
+  return p + (p.includes("?") ? "&" : "?") + "url=" + e;
+}
+async function fetchWithTimeout(u, ms){
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms);
+  try { return await fetch(u, {signal:c.signal, cache:"no-store"}); }
+  finally { clearTimeout(t); }
+}
+async function fetchJSON(url){
+  let lastErr;
+  for (const p of proxyList()){
+    try {
+      const r = await fetchWithTimeout(wrap(p, url), 9000);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = JSON.parse(await r.text());
+      if (goodProxy !== p) { goodProxy = p; store.set("goodProxy", p); }
+      return j;
+    } catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error("No proxy worked");
+}
+
+// ---------- data ----------
+function quoteFromMeta(sym, meta, closes){
+  let price = meta && meta.regularMarketPrice;
+  if (price == null && closes) { for (let i = closes.length-1; i >= 0; i--) if (closes[i] != null){ price = closes[i]; break; } }
+  const prev = meta ? (meta.previousClose ?? meta.chartPreviousClose) : null;
+  return { sym, price, prev, chg: (price != null && prev) ? (price/prev - 1) * 100 : null, time: meta && meta.regularMarketTime };
+}
+
+async function getSpark(symbols){
+  const url = "https://query1.finance.yahoo.com/v7/finance/spark?symbols=" + symbols.map(encodeURIComponent).join(",") + "&range=1d&interval=5m&indicators=close";
+  const j = await fetchJSON(url);
+  const out = {};
+  if (j && j.spark && Array.isArray(j.spark.result)){
+    j.spark.result.forEach(r => {
+      const resp = r.response && r.response[0];
+      if (!resp) return;
+      const closes = resp.indicators && resp.indicators.quote && resp.indicators.quote[0] && resp.indicators.quote[0].close;
+      out[r.symbol] = quoteFromMeta(r.symbol, resp.meta, closes);
+    });
+  } else if (j && typeof j === "object"){
+    Object.keys(j).forEach(s => {
+      const v = j[s]; if (!v) return;
+      const meta = { previousClose: v.previousClose, chartPreviousClose: v.chartPreviousClose, regularMarketPrice: v.regularMarketPrice };
+      out[s] = quoteFromMeta(s, meta, v.close);
+    });
+  }
+  return out;
+}
+
+async function getChart(sym, prePost){
+  const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1d&interval=1m&includePrePost=" + (prePost ? "true" : "false");
+  const j = await fetchJSON(url);
+  const res = j && j.chart && j.chart.result && j.chart.result[0];
+  if (!res) throw new Error("No chart for " + sym);
+  const closes = res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].close || [];
+  const q = quoteFromMeta(sym, res.meta, null);
+  let last = null;
+  for (let i = closes.length-1; i >= 0; i--) if (closes[i] != null){ last = closes[i]; break; }
+  q.extPrice = last;
+  return q;
+}
+
+async function getQuotes(symbols){
+  const out = {};
+  const chunks = [];
+  for (let i = 0; i < symbols.length; i += 20) chunks.push(symbols.slice(i, i+20));
+  await Promise.all(chunks.map(async c => {
+    try { Object.assign(out, await getSpark(c)); } catch(e){ /* fall back below */ }
+  }));
+  const missing = symbols.filter(s => !out[s] || out[s].price == null);
+  for (let i = 0; i < missing.length; i += 5){
+    await Promise.all(missing.slice(i, i+5).map(async s => {
+      try { out[s] = await getChart(s, false); } catch(e){}
+    }));
+  }
+  return out;
+}
+
+// ---------- market clock ----------
+function partsIn(tz){
+  const p = new Intl.DateTimeFormat("en-US",{timeZone:tz,weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date());
+  const g = t => (p.find(x => x.type === t) || {}).value;
+  return { wd: g("weekday"), m: (parseInt(g("hour"),10) % 24) * 60 + parseInt(g("minute"),10) };
+}
+function updateClocks(){
+  const k = partsIn("Asia/Seoul"), u = partsIn("America/New_York");
+  const kWeek = !["Sat","Sun"].includes(k.wd), uWeek = !["Sat","Sun"].includes(u.wd);
+  const kp = $("krxPill"), up = $("usPill");
+  kp.className = "pill"; up.className = "pill";
+  if (kWeek && k.m >= 540 && k.m < 930){ kp.textContent = "KRX open"; kp.classList.add("open"); }
+  else if (kWeek && ((k.m >= 480 && k.m < 540) || (k.m >= 940 && k.m < 1200))){ kp.textContent = "KRX extended"; kp.classList.add("ext"); }
+  else kp.textContent = "KRX closed";
+  if (uWeek && u.m >= 570 && u.m < 960){ up.textContent = "US open"; up.classList.add("open"); }
+  else if (uWeek && ((u.m >= 240 && u.m < 570) || (u.m >= 960 && u.m < 1200))){ up.textContent = u.m < 570 ? "US pre-market" : "US after-hours"; up.classList.add("ext"); }
+  else up.textContent = "US closed";
+}
+
+// ---------- render ----------
+let rows = [];
+let sortKey = store.get("sortKey","weight"), sortDir = store.get("sortDir",-1);
+let lastPrice = {};
+
+function setCard(idP, idC, q, digits){
+  $(idP).textContent = q && q.price != null ? fmt(q.price, digits) : "—";
+  const c = $(idC);
+  c.textContent = q && q.chg != null ? pct(q.chg) + "  (prev " + fmt(q.prev, digits) + ")" : "—";
+  c.className = "sub " + cls(q && q.chg);
+}
+
+function render(){
+  const f = ($("search").value || "").toLowerCase();
+  const list = rows.filter(r => !f || r.name.toLowerCase().includes(f) || r.sym.toLowerCase().includes(f));
+  list.sort((a,b) => {
+    let x = a[sortKey], y = b[sortKey];
+    if (typeof x === "string") return sortDir * x.localeCompare(y);
+    x = x == null ? -Infinity : x; y = y == null ? -Infinity : y;
+    return sortDir * (x - y);
+  });
+  const maxW = Math.max(...rows.map(r => r.weight), 1);
+  $("rows").innerHTML = list.map(r => {
+    const old = lastPrice[r.sym];
+    const flash = (old != null && r.price != null && old !== r.price) ? (r.price > old ? "flashup" : "flashdown") : "";
+    return `<tr class="${flash}">
+      <td class="l">${r.rank}</td>
+      <td class="l"><div class="name">${esc(r.name)}</div><div class="tick">${esc(r.sym.replace(".KS"," · KRX"))}</div></td>
+      <td class="wcell"><div class="wbar"><div class="track"><div class="fill" style="width:${(r.weight/maxW*100).toFixed(1)}%"></div></div><span class="wtag">${fmt(r.weight)}%</span></div></td>
+      <td>${r.liveWeight != null ? fmt(r.liveWeight) + "%" : "—"}</td>
+      <td>${r.price != null ? fmt(r.price, 0) : "—"}</td>
+      <td class="${cls(r.chg)}">${pct(r.chg)}</td>
+      <td class="${cls(r.contrib)}">${r.contrib != null ? (r.contrib > 0 ? "+" : "") + r.contrib.toFixed(3) + "%" : "—"}</td>
+    </tr>`;
+  }).join("");
+  rows.forEach(r => { if (r.price != null) lastPrice[r.sym] = r.price; });
+  document.querySelectorAll("th[data-k]").forEach(th => {
+    th.classList.toggle("sorted", th.dataset.k === sortKey);
+    const base = th.textContent.replace(/ [▲▼]$/,"");
+    th.textContent = base + (th.dataset.k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : "");
+  });
+}
+
+function renderMovers(){
+  const withC = rows.filter(r => r.contrib != null);
+  const lifts = withC.filter(r => r.contrib > 0).sort((a,b) => b.contrib - a.contrib).slice(0,3);
+  const drags = withC.filter(r => r.contrib < 0).sort((a,b) => a.contrib - b.contrib).slice(0,3);
+  const li = r => `<li><b>${esc(r.name)}</b> <span class="tick">(${fmt(r.weight)}% of EWY)</span> <span class="${cls(r.chg)}">${pct(r.chg)}</span> → <span class="${cls(r.contrib)}">${(r.contrib>0?"+":"")+r.contrib.toFixed(3)}%</span></li>`;
+  $("lifts").innerHTML = lifts.length ? lifts.map(li).join("") : "<li class='flat'>None now</li>";
+  $("drags").innerHTML = drags.length ? drags.map(li).join("") : "<li class='flat'>None now</li>";
+}
+
+// ---------- main loop ----------
+let busy = false, timer = null;
+async function refresh(){
+  if (busy) return;
+  busy = true;
+  updateClocks();
+  $("dot").className = "dot";
+  try {
+    const hs = settings.holdings;
+    const syms = hs.map(h => h[0]).concat(MARKET);
+    const [quotes, ewy] = await Promise.all([
+      getQuotes(syms),
+      getChart("EWY", true).catch(() => null)
+    ]);
+    const got = Object.values(quotes).filter(q => q && q.price != null).length;
+    if (!got && !ewy) throw new Error("No data");
+
+    // Holdings
+    let sumW = 0, sumWR = 0, coveredW = 0, ups = 0, downs = 0;
+    rows = hs.map((h, i) => {
+      const q = quotes[h[0]] || {};
+      const w = Number(h[2]) || 0;
+      sumW += w;
+      if (q.chg != null){ sumWR += w * q.chg; coveredW += w; if (q.chg > 0) ups++; else if (q.chg < 0) downs++; }
+      return { rank:i+1, sym:h[0], name:h[1], weight:w, price:q.price, chg:q.chg, contrib: q.chg != null ? w * q.chg / 100 : null };
+    });
+    const basketKrw = coveredW ? sumWR / coveredW : null;       // scaled to 100%
+    const listMoveKrw = sumWR / 100;                              // EWY % pts from listed stocks only
+    rows.forEach(r => {
+      r.liveWeight = r.chg != null ? r.weight * (1 + r.chg/100) / (1 + listMoveKrw/100) : null;
+    });
+
+    // FX: USD/KRW up = won weaker = EWY lower in USD
+    const fx = quotes["KRW=X"];
+    const basketUsd = (basketKrw != null && fx && fx.chg != null) ? ((1 + basketKrw/100) / (1 + fx.chg/100) - 1) * 100 : basketKrw;
+
+    // Cards
+    if (ewy){
+      $("ewyPrice").textContent = "$" + fmt(ewy.price);
+      const c = $("ewyChg");
+      c.textContent = ewy.chg != null ? pct(ewy.chg) + "  (prev $" + fmt(ewy.prev) + ")" : "—";
+      c.className = "sub " + cls(ewy.chg);
+      const e = $("ewyExt");
+      if (ewy.extPrice != null && ewy.price != null && Math.abs(ewy.extPrice - ewy.price) > 0.001){
+        const ec = (ewy.extPrice / ewy.price - 1) * 100;
+        e.innerHTML = `Extended: $${fmt(ewy.extPrice)} <span class="${cls(ec)}">${pct(ec)}</span>`;
+      } else e.textContent = "";
+    }
+    $("basketUsd").textContent = pct(basketUsd);
+    $("basketUsd").className = "big " + cls(basketUsd);
+    $("basketKrw").textContent = "In won: " + pct(basketKrw) + (fx && fx.chg != null ? "  · won effect " + pct(-fx.chg) : "");
+    setCard("kospi","kospiChg", quotes["^KS11"], 2);
+    setCard("fx","fxChg", quotes["KRW=X"], 2);
+    setCard("mu","muChg", quotes["MU"], 2);
+    $("coverage").textContent = fmt(sumW,1) + "%";
+    $("breadth").innerHTML = `${hs.length} stocks · <span class="up">${ups} up</span> · <span class="down">${downs} down</span>`;
+
+    renderMovers();
+    render();
+
+    $("banner").style.display = "none";
+    $("dot").className = "dot live";
+    $("updated").textContent = "Updated " + new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit",second:"2-digit"});
+  } catch(e){
+    $("dot").className = "dot err";
+    $("updated").textContent = "Data error";
+    const b = $("banner");
+    b.style.display = "block";
+    b.textContent = "Cannot get prices now. The free data proxies can be busy or blocked. Wait for the next refresh, or put your own proxy URL (for example your Cloudflare Worker) in Settings.";
+  } finally {
+    busy = false;
+  }
+}
+function schedule(){
+  clearInterval(timer);
+  timer = setInterval(() => { if (!document.hidden) refresh(); }, Math.max(5, settings.refresh) * 1000);
+}
+
+// ---------- settings UI ----------
+function holdingsToText(h){ return h.map(x => `${x[0]}, ${x[1]}, ${x[2]}`).join("\n"); }
+function parseHoldings(t){
+  const out = [];
+  t.split(/\r?\n/).forEach(line => {
+    const p = line.split(/[,\t]/).map(s => s.trim()).filter(Boolean);
+    if (p.length < 3) return;
+    let sym = p[0].toUpperCase();
+    if (/^\d{6}$/.test(sym)) sym += ".KS";
+    const w = parseFloat(p[p.length-1].replace("%",""));
+    const name = p.slice(1, -1).join(", ");
+    if (sym && name && isFinite(w)) out.push([sym, name, w]);
+  });
+  return out;
+}
+function fillSettings(){
+  $("setRefresh").value = settings.refresh;
+  $("setProxy").value = settings.proxy;
+  $("setHoldings").value = holdingsToText(settings.holdings);
+}
+$("saveBtn").onclick = () => {
+  const h = parseHoldings($("setHoldings").value);
+  if (!h.length){ alert("No valid lines. Use: ticker, name, weight"); return; }
+  h.sort((a,b) => b[2] - a[2]);
+  settings.refresh = Math.max(5, parseInt($("setRefresh").value, 10) || 20);
+  settings.proxy = $("setProxy").value.trim();
+  settings.holdings = h;
+  store.set("refresh", settings.refresh); store.set("proxy", settings.proxy); store.set("holdings", h);
+  lastPrice = {};
+  fillSettings(); schedule(); refresh();
+};
+$("resetBtn").onclick = () => {
+  settings.holdings = DEFAULT_HOLDINGS;
+  store.set("holdings", null);
+  fillSettings(); refresh();
+};
+$("refreshBtn").onclick = refresh;
+$("search").oninput = render;
+document.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => {
+  const k = th.dataset.k;
+  if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = (k === "name" || k === "rank") ? 1 : -1; }
+  store.set("sortKey", sortKey); store.set("sortDir", sortDir);
+  render();
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+$("asof").textContent = WEIGHTS_ASOF;
+fillSettings();
+updateClocks();
+setInterval(updateClocks, 30000);
+schedule();
+refresh();
+})();
+</script>
+</body>
+</html>
