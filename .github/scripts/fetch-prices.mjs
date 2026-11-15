@@ -135,10 +135,18 @@ function publish() {
 }
 
 const NEWS_EVERY_MS = 55000;
-let news = { items: [], errors: [] }, newsAt = 0;
+let news = { items: [], errors: [] }, newsAt = 0, newsRound = 0;
+// Start with the headlines saved by the last run.
+try {
+  const r = await fetch(`https://raw.githubusercontent.com/${process.env.GITHUB_REPOSITORY || "stevenwsharp-ctrl/EWY-Sniper"}/data/data.json?t=${Date.now()}`);
+  if (r.ok) { const j = await r.json(); news.items = Array.isArray(j.news) ? j.news : []; }
+} catch (e) {}
+console.log(`news from last run: ${news.items.length}`);
 async function refreshNews() {
-  try { news = await getNews(HOLDINGS); newsAt = Date.now(); }
-  catch (e) { news.errors = [e.message]; }
+  try {
+    const got = await getNews(HOLDINGS, news.items, newsRound++);
+    news = got; newsAt = Date.now();
+  } catch (e) { news.errors = [e.message]; }
   console.log(`news: ${news.items.length} items, ${news.items.filter(x => x.major).length} major` + (news.errors.length ? `; errors: ${news.errors.slice(0, 3).join(" | ")}` : ""));
 }
 

@@ -117,7 +117,9 @@ function score(title, tickers, weights) {
 
 function norm(title) { return title.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim().slice(0, 90); }
 
-export async function getNews(holdings) {
+// round: each call does 1/3 of the Google searches, so each search repeats about every 3 calls.
+// prev: the headlines from before. New ones are added; an empty result does not erase the list.
+export async function getNews(holdings, prev = [], round = 0) {
   const weights = Object.fromEntries(holdings.map(h => [h[0], h[2]]));
   const names = holdings.map(h => h[1]);
   const queries = [];
@@ -128,11 +130,13 @@ export async function getNews(holdings) {
 
   const raw = [];
   const errors = [];
-  await Promise.all(queries.map(async q => { try { raw.push(...await googleNews(q)); } catch (e) { errors.push("google: " + e.message); } }));
+  const mine = queries.filter((q, i) => i % 3 === round % 3);
+  await Promise.all(mine.map(async q => { try { raw.push(...await googleNews(q)); } catch (e) { errors.push("google: " + e.message); } }));
   await Promise.all(holdings.slice(0, 5).map(async h => { try { raw.push(...await yahooNews(h[0])); } catch (e) { errors.push("yahoo: " + e.message); } }));
 
   const now = Date.now();
   const byKey = new Map();
+  for (const p of prev) if (p && p.id && p.time && now - p.time <= MAX_AGE_H * 3600e3 && !NOISE.test(p.title || "")) byKey.set(norm(p.title), { ...p });
   for (const it of raw) {
     if (!it.title || !it.link || !it.time || now - it.time > MAX_AGE_H * 3600e3) continue;
     if (NOISE.test(it.title)) continue;
@@ -142,7 +146,7 @@ export async function getNews(holdings) {
     if (!tickers.length && !isMarket) continue;
     const k = norm(it.title);
     const prev = byKey.get(k);
-    if (prev) { prev.tickers = [...new Set([...prev.tickers, ...tickers])]; if (it.time < prev.time) prev.time = it.time; continue; }
+    if (prev) { prev.tickers = [...new Set([...prev.tickers, ...tickers])]; continue; }
     byKey.set(k, { id: k.slice(0, 60), title: it.title, link: it.link, source: it.source || "", time: it.time, tickers, market: isMarket });
   }
   const items = [...byKey.values()].map(n => {
