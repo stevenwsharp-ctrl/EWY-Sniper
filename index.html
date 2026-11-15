@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>EWY Sniper</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#0b0e13">
 <meta name="description" content="Live tracker for the stocks in the iShares MSCI South Korea ETF (EWY), with each stock's % weight in EWY.">
 <style>
 :root{
@@ -49,6 +52,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .name{font-weight:600}
 .tick{color:var(--mute);font-size:12px}
 .wcell{min-width:130px}
+.ext .tick{font-size:11px}.ext.stale{opacity:.6}
+.livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);box-shadow:0 0 6px var(--warn);margin-right:4px;vertical-align:1px}
 .wbar{display:flex;align-items:center;gap:8px;justify-content:flex-end}
 .wbar .track{width:70px;height:8px;background:var(--panel2);border-radius:4px;overflow:hidden}
 .wbar .fill{height:100%;background:var(--bar)}
@@ -116,6 +121,7 @@ td.l .name{cursor:pointer}
       <div class="lbl">Korea basket → EWY (USD)</div>
       <div class="big" id="basketUsd">—</div>
       <div class="sub" id="basketKrw">—</div>
+      <div class="sub" id="basketExt"></div>
     </div>
     <div class="card">
       <div class="lbl">KOSPI</div>
@@ -168,6 +174,7 @@ td.l .name{cursor:pointer}
         <th data-k="liveWeight">Live % of EWY</th>
         <th data-k="price">Price (₩)</th>
         <th data-k="chg">Today</th>
+        <th data-k="extChg" title="Nextrade pre-market (08:00–08:50 KST) and after-market (15:30–20:00 KST)">Pre / After</th>
         <th data-k="contrib">EWY impact</th>
       </tr></thead>
       <tbody id="rows"></tbody>
@@ -195,6 +202,7 @@ td.l .name{cursor:pointer}
 
   <footer>
     <p id="asof"></p>
+    <p>"Pre / After" = the Nextrade (NXT) pre-market (08:00–08:50 KST) and after-market (15:30–20:00 KST) price, from Naver Finance, compared with the last KRX close.</p>
     <p>News comes from Google News and Yahoo Finance. "Major" stories are picked by keywords (for example plunge, earnings, tariff, probe, downgrade) and by the stock's weight in EWY. Click 🔔 to get a sound and a pop-up when a new major story comes in. Keep this tab open for alerts.</p>
     <p>"Korea basket → EWY" = the weighted move of the listed Korean stocks (scaled to 100%), changed to USD with the won move. Compare it with the EWY move to see the likely gap at the next EWY open. Prices come from Yahoo Finance. They are saved about every minute, so they can have a short delay. This page is for information only. It is not financial advice.</p>
   </footer>
@@ -421,6 +429,7 @@ function render(){
       <td>${r.liveWeight != null ? fmt(r.liveWeight) + "%" : "—"}</td>
       <td>${r.price != null ? fmt(r.price, 0) : "—"}</td>
       <td class="${cls(r.chg)}">${pct(r.chg)}</td>
+      ${extCell(r)}
       <td class="${cls(r.contrib)}">${r.contrib != null ? (r.contrib > 0 ? "+" : "") + r.contrib.toFixed(3) + "%" : "—"}</td>
     </tr>`;
   }).join("");
@@ -431,6 +440,21 @@ function render(){
     th.textContent = base + (th.dataset.k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : "");
   });
 }
+
+function kstTime(t){
+  if (!t) return "";
+  try { return new Date(t).toLocaleString("en-US",{timeZone:"Asia/Seoul",weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false}) + " KST"; } catch(e){ return ""; }
+}
+function extCell(r){
+  const x = r.ext;
+  if (!x || x.price == null) return `<td class="ext">—</td>`;
+  const name = x.session === "pre" ? "Pre-market" : "After-hours";
+  const label = x.live ? `<span class="livedot"></span>${name} live` : `${name} close · ${kstTime(x.time)}`;
+  // During the KRX regular session, the pre-market number is old. Show it dimmed.
+  const stale = !x.live && x.session === "pre" && krxOpenNow();
+  return `<td class="ext${stale ? " stale" : ""}"><div>${fmt(x.price,0)} <span class="${cls(x.chg)}">${pct(x.chg)}</span></div><div class="tick">${label}</div></td>`;
+}
+function krxOpenNow(){ const k = partsIn("Asia/Seoul"); return !["Sat","Sun"].includes(k.wd) && k.m >= 540 && k.m < 930; }
 
 function renderMovers(){
   const withC = rows.filter(r => r.contrib != null);
@@ -578,7 +602,9 @@ async function refresh(){
       const w = Number(h[2]) || 0;
       sumW += w;
       if (q.chg != null){ sumWR += w * q.chg; coveredW += w; if (q.chg > 0) ups++; else if (q.chg < 0) downs++; }
-      return { rank:i+1, sym:h[0], name:h[1], weight:w, price:q.price, chg:q.chg, contrib: q.chg != null ? w * q.chg / 100 : null };
+      const ext = q.ext || null;
+      return { rank:i+1, sym:h[0], name:h[1], weight:w, price:q.price, chg:q.chg, contrib: q.chg != null ? w * q.chg / 100 : null,
+               ext, extChg: ext && ext.chg != null ? ext.chg : null };
     });
     const basketKrw = coveredW ? sumWR / coveredW : null;       // scaled to 100%
     const listMoveKrw = sumWR / 100;                              // EWY % pts from listed stocks only
@@ -605,6 +631,14 @@ async function refresh(){
     $("basketUsd").textContent = pct(basketUsd);
     $("basketUsd").className = "big " + cls(basketUsd);
     $("basketKrw").textContent = "In won: " + pct(basketKrw) + (fx && fx.chg != null ? "  · won effect " + pct(-fx.chg) : "");
+    // Pre-market / after-hours move of the basket (weighted, scaled to 100%).
+    let ew = 0, ewr = 0, anyLive = false, sess = null;
+    rows.forEach(r => { if (r.extChg != null && !(r.ext.session === "pre" && !r.ext.live && krxOpenNow())){ ew += r.weight; ewr += r.weight * r.extChg; anyLive = anyLive || r.ext.live; sess = sess || r.ext.session; } });
+    const be = $("basketExt");
+    if (ew){
+      const v = ewr / ew;
+      be.innerHTML = `${anyLive ? '<span class="livedot"></span>' : ""}${sess === "pre" ? "Pre-market" : "After-hours"} (won): <span class="${cls(v)}">${pct(v)}</span>`;
+    } else be.textContent = "";
     setCard("kospi","kospiChg", quotes["^KS11"], 2);
     setCard("fx","fxChg", quotes["KRW=X"], 2);
     setCard("mu","muChg", quotes["MU"], 2);

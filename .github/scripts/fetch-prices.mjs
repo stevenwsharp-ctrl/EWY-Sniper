@@ -54,12 +54,49 @@ async function chart(sym) {
   throw new Error(`${sym}: ${lastErr?.message}`);
 }
 
+// Nextrade (NXT) pre-market (08:00–08:50 KST) and after-market (15:30–20:00 KST) from Naver Finance.
+const num = v => { if (v == null) return null; const n = Number(String(v).replace(/,/g, "")); return isFinite(n) && n > 0 ? n : null; };
+async function naverExt(sym) {
+  const code = sym.slice(0, 6);
+  const r = await fetch(`https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`, { headers: { "User-Agent": UA, "Accept": "application/json" } });
+  if (!r.ok) throw new Error(`naver ${code} HTTP ${r.status}`);
+  const d = (await r.json())?.datas?.[0];
+  if (!d) throw new Error(`naver ${code} no data`);
+  const o = d.overMarketPriceInfo || {};
+  const status = String(o.overMarketStatus || "").toUpperCase();       // PREOPEN, OPEN, CLOSE
+  const st = String(o.tradingSessionType || "").toUpperCase();          // PRE_MARKET, AFTER_MARKET
+  const ms = String(d.marketSessionType || "");                         // preMarket, regularMarket, afterMarket
+  let price = null, session = null, live = false, time = null;
+  if (st && num(o.overPrice) && status !== "PREOPEN") {
+    price = num(o.overPrice); session = st.startsWith("PRE") ? "pre" : "after";
+    live = status === "OPEN"; time = o.localTradedAt;
+  } else if (/after/i.test(ms) && num(d.closePriceRaw ?? d.closePrice)) {
+    // Before the next pre-market opens: the last after-market trade.
+    price = num(d.closePriceRaw ?? d.closePrice); session = "after"; time = d.localTradedAt;
+  }
+  return { price, session, live, time, status, raw: { st, ms } };
+}
+
 async function snapshot() {
   const quotes = {};
   const errors = [];
   for (let i = 0; i < SYMBOLS.length; i += 6) {
     await Promise.all(SYMBOLS.slice(i, i + 6).map(async s => {
       try { quotes[s] = await chart(s); } catch (e) { errors.push(e.message); }
+    }));
+  }
+  for (let i = 0; i < korean.length; i += 6) {
+    await Promise.all(korean.slice(i, i + 6).map(async s => {
+      try {
+        const x = await naverExt(s);
+        const q = quotes[s];
+        // Compare with the last KRX close. After the 09:00 KST open, Yahoo's price is live, so a
+        // pre-market price is compared with the previous close.
+        const kst = new Date(Date.now() + 9 * 3600e3), kstMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+        const ref = x.session === "pre" && kstMin >= 540 ? q?.prev : q?.price;
+        if (q && x.price && ref) quotes[s].ext = { ...x, ref, chg: (x.price / ref - 1) * 100 };
+        else if (q) quotes[s].ext = { ...x, chg: null };
+      } catch (e) { errors.push(e.message); }
     }));
   }
   return { updated: new Date().toISOString(), quotes, errors };
