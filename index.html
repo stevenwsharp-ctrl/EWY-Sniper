@@ -74,7 +74,7 @@ footer{color:var(--mute);font-size:12px;margin-top:16px}
 .newshead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
 .newshead .lbl{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
 .seg button{padding:3px 9px;font-size:12px}.seg button.act{border-color:var(--accent);color:var(--accent)}
-.nlist{max-height:440px;overflow-y:auto}
+.nlist{max-height:620px;overflow-y:auto}
 .nitem{padding:8px 4px;border-top:1px solid var(--line)}
 .nitem:first-child{border-top:0}
 .nitem a{color:var(--text);text-decoration:none;font-weight:600}
@@ -156,7 +156,7 @@ td.l .name{cursor:pointer}
       <span class="seg"><button id="nAll">All</button> <button id="nMajor">Major only</button></span>
       <span id="nFilter"></span>
       <span class="spacer"></span>
-      <span class="tick" id="nUpdated"></span>
+      <span class="tick" id="nCount"></span> <span class="tick" id="nUpdated"></span>
     </div>
     <div class="nlist" id="news"><div class="tick">Loading news…</div></div>
   </section>
@@ -497,11 +497,13 @@ function renderNews(){
   $("nAll").classList.toggle("act", !majorOnly);
   $("nMajor").classList.toggle("act", majorOnly);
   $("nFilter").innerHTML = newsFilter ? `<span class="chip" id="nClear">${esc(nameOf(newsFilter))} ✕</span>` : "";
-  $("nUpdated").textContent = newsTime ? "News checked " + ago(newsTime.getTime()) : "";
-  const list = news.filter(n => (!majorOnly || n.major) && (!newsFilter || n.tickers.includes(newsFilter))).slice(0, 60);
+  $("nUpdated").textContent = newsTime ? "· checked " + ago(newsTime.getTime()) : "";
+  // All headlines, newest at the top.
+  const list = news.filter(n => (!majorOnly || n.major) && (!newsFilter || n.tickers.includes(newsFilter))).sort((a,b) => b.time - a.time);
+  $("nCount").textContent = list.length + " headlines, last 48 h";
   $("news").innerHTML = list.length ? list.map(n => `<div class="nitem${n.major ? " major" : ""}${freshIds.has(n.id) ? " fresh" : ""}">
       ${n.major ? '<span class="badge">MAJOR</span>' : ""}<a href="${esc(safeLink(n.link))}" target="_blank" rel="noopener">${esc(n.title)}</a>
-      <div class="nmeta"><span>${esc(n.source)}</span><span>· ${ago(n.time)}</span>${n.tickers.map(chipHtml).join("")}${n.market && !n.tickers.length ? '<span class="chip">Korea market</span>' : ""}</div>
+      <div class="nmeta"><span>${esc(n.source)}</span><span>· ${new Date(n.time).toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"})} (${ago(n.time)})</span>${n.tickers.map(chipHtml).join("")}${n.market && !n.tickers.length ? '<span class="chip">Korea market</span>' : ""}</div>
     </div>`).join("") : `<div class="tick">No ${majorOnly ? "major " : ""}news${newsFilter ? " for " + esc(nameOf(newsFilter)) : ""} in the last 48 hours.</div>`;
   freshIds.clear();
 }
