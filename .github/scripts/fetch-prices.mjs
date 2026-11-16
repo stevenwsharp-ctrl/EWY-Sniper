@@ -93,19 +93,72 @@ async function naver(sym) {
     const price = num(d.closePriceRaw ?? d.closePrice);
     const diff = Number(String(d.compareToPreviousClosePriceRaw ?? "").replace(/,/g, ""));
     if (price && isFinite(diff)) {
-      regular = { price, prev: price - diff, chg: (diff / (price - diff)) * 100, time: d.localTradedAt, live: true };
+      regular = { price, prev: price - diff, chg: (diff / (price - diff)) * 100, time: d.localTradedAt, live: true, open: num(d.openPriceRaw ?? d.openPrice) };
       lastRegular[sym] = { ...regular, live: false, day: String(d.localTradedAt || "").slice(0, 10) };
     }
   }
 
   let ext = null;
   if ((st === "PRE_MARKET" || st === "AFTER_MARKET") && num(o.overPrice) && status !== "PREOPEN") {
-    ext = { price: num(o.overPrice), session: st === "PRE_MARKET" ? "pre" : "after", live: status === "OPEN", time: o.localTradedAt };
+    ext = { price: num(o.overPrice), session: st === "PRE_MARKET" ? "pre" : "after", live: status === "OPEN", time: o.localTradedAt, open: num(o.openPrice) };
   } else if (!regular && /after/i.test(ms) && num(d.closePriceRaw ?? d.closePrice)) {
     // Before the next pre-market opens: the last after-market trade.
     ext = { price: num(d.closePriceRaw ?? d.closePrice), session: "after", live: false, time: d.localTradedAt };
   }
   return { regular, ext };
+}
+
+// ---------- intraday charts ----------
+// chart[sym][session] = { day, open, points: [[minute of day KST, price], ...] }
+// Regular session: Naver 1-minute bars. Pre-market and after-hours: our own sample each minute.
+const charts = {};
+const barsAt = {};
+const kstNow = () => { const k = new Date(Date.now() + 9 * 3600e3); return { day: k.toISOString().slice(0, 10), min: k.getUTCHours() * 60 + k.getUTCMinutes() }; };
+async function naverBars(code) {
+  const r = await fetch(`https://api.stock.naver.com/chart/domestic/item/${code}/minute`, { headers: { "User-Agent": UA, "Accept": "application/json" } });
+  if (!r.ok) throw new Error(`bars ${code} HTTP ${r.status}`);
+  const a = await r.json();
+  if (!Array.isArray(a)) return null;
+  const pts = a.filter(b => b && b.localDateTime && b.currentPrice).map(b => {
+    const t = String(b.localDateTime);
+    return [Number(t.slice(8, 10)) * 60 + Number(t.slice(10, 12)), Math.round(b.currentPrice)];
+  });
+  const day = a.length ? `${String(a[0].localDateTime).slice(0, 4)}-${String(a[0].localDateTime).slice(4, 6)}-${String(a[0].localDateTime).slice(6, 8)}` : null;
+  return { day, open: a[0] ? Math.round(a[0].openPrice) : null, points: pts };
+}
+function addPoint(c, min, price) {
+  const last = c.points[c.points.length - 1];
+  if (last && last[0] === min) last[1] = price; else c.points.push([min, price]);
+}
+async function updateChart(sym, regular, ext) {
+  const k = kstNow();
+  const c = charts[sym] = charts[sym] || {};
+  if (regular) {
+    if (!barsAt[sym] || Date.now() - barsAt[sym] > 55000) {
+      try {
+        const b = await naverBars(sym.slice(0, 6));
+        if (b && b.day === k.day && b.points.length) { c.regular = { day: k.day, open: regular.open || b.open, points: b.points }; barsAt[sym] = Date.now(); }
+      } catch (e) {}
+    }
+    if (!c.regular || c.regular.day !== k.day) c.regular = { day: k.day, open: regular.open || regular.price, points: [] };
+    if (regular.open) c.regular.open = regular.open;
+    addPoint(c.regular, k.min, regular.price);
+  }
+  if (ext && ext.live) {
+    const sname = ext.session;
+    if (!c[sname] || c[sname].day !== k.day) c[sname] = { day: k.day, open: ext.open || ext.price, points: [] };
+    if (ext.open) c[sname].open = ext.open;
+    addPoint(c[sname], k.min, ext.price);
+  }
+  // The chart to show: the live session, else the newest session that has points.
+  let pick = regular ? "regular" : ext && ext.live ? ext.session : null;
+  if (!pick) {
+    const order = ["after", "regular", "pre"].filter(n => c[n] && c[n].points.length);
+    order.sort((a, b) => (c[b].day + String(c[b].points.at(-1)[0]).padStart(4, "0")).localeCompare(c[a].day + String(c[a].points.at(-1)[0]).padStart(4, "0")));
+    pick = order[0] || null;
+  }
+  if (!pick || !c[pick]) return null;
+  return { session: pick, live: pick === "regular" ? !!regular : !!(ext && ext.live && ext.session === pick), ...c[pick] };
 }
 
 async function snapshot() {
@@ -120,6 +173,7 @@ async function snapshot() {
     await Promise.all(korean.slice(i, i + 6).map(async s => {
       try {
         const { regular, ext } = await naver(s);
+        const chart = await updateChart(s, regular, ext);
         const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
         if (regular) quotes[s] = { ...(quotes[s] || {}), ...regular, src: "naver" };
         else if (lastRegular[s] && lastRegular[s].day === today && quotes[s]) {
@@ -129,6 +183,7 @@ async function snapshot() {
         }
         const q = quotes[s];
         if (q) q.krxLive = !!regular;
+        if (q && chart) q.chart = chart;
         // The extended price is compared with the last KRX close.
         if (q && ext && q.price) q.ext = { ...ext, ref: q.price, chg: (ext.price / q.price - 1) * 100 };
         else if (q) delete q.ext;
@@ -157,7 +212,17 @@ let news = { items: [], errors: [] }, newsAt = 0, newsRound = 0;
 // Start with the headlines saved by the last run.
 try {
   const r = await fetch(`https://raw.githubusercontent.com/${process.env.GITHUB_REPOSITORY || "stevenwsharp-ctrl/EWY-Sniper"}/data/data.json?t=${Date.now()}`);
-  if (r.ok) { const j = await r.json(); news.items = Array.isArray(j.news) ? j.news : []; }
+  if (r.ok) {
+    const j = await r.json();
+    news.items = Array.isArray(j.news) ? j.news : [];
+    // Keep the charts from the last run.
+    for (const [sym, q] of Object.entries(j.quotes || {})) {
+      if (q && q.chart && q.chart.session && Array.isArray(q.chart.points)) {
+        charts[sym] = charts[sym] || {};
+        charts[sym][q.chart.session] = { day: q.chart.day, open: q.chart.open, points: q.chart.points };
+      }
+    }
+  }
 } catch (e) {}
 console.log(`news from last run: ${news.items.length}`);
 async function refreshNews() {
