@@ -74,7 +74,10 @@ async function chart(sym) {
 
 // Nextrade (NXT) pre-market (08:00–08:50 KST) and after-market (15:30–20:00 KST) from Naver Finance.
 const num = v => { if (v == null) return null; const n = Number(String(v).replace(/,/g, "")); return isFinite(n) && n > 0 ? n : null; };
-async function naverExt(sym) {
+// Naver gives the real-time KRX price in the regular session (Yahoo's KRX prices are ~20 min late),
+// and the Nextrade pre-market / after-market price.
+const lastRegular = {};   // last real-time KRX price seen in this run, by ticker
+async function naver(sym) {
   const code = sym.slice(0, 6);
   const r = await fetch(`https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`, { headers: { "User-Agent": UA, "Accept": "application/json" } });
   if (!r.ok) throw new Error(`naver ${code} HTTP ${r.status}`);
@@ -82,17 +85,27 @@ async function naverExt(sym) {
   if (!d) throw new Error(`naver ${code} no data`);
   const o = d.overMarketPriceInfo || {};
   const status = String(o.overMarketStatus || "").toUpperCase();       // PREOPEN, OPEN, CLOSE
-  const st = String(o.tradingSessionType || "").toUpperCase();          // PRE_MARKET, AFTER_MARKET
+  const st = String(o.tradingSessionType || "").toUpperCase();          // PRE_MARKET, REGULAR_MARKET, AFTER_MARKET
   const ms = String(d.marketSessionType || "");                         // preMarket, regularMarket, afterMarket
-  let price = null, session = null, live = false, time = null;
-  if (st && num(o.overPrice) && status !== "PREOPEN") {
-    price = num(o.overPrice); session = st.startsWith("PRE") ? "pre" : "after";
-    live = status === "OPEN"; time = o.localTradedAt;
-  } else if (/after/i.test(ms) && num(d.closePriceRaw ?? d.closePrice)) {
-    // Before the next pre-market opens: the last after-market trade.
-    price = num(d.closePriceRaw ?? d.closePrice); session = "after"; time = d.localTradedAt;
+
+  let regular = null;
+  if (/regular/i.test(ms) && String(d.marketStatus).toUpperCase() === "OPEN") {
+    const price = num(d.closePriceRaw ?? d.closePrice);
+    const diff = Number(String(d.compareToPreviousClosePriceRaw ?? "").replace(/,/g, ""));
+    if (price && isFinite(diff)) {
+      regular = { price, prev: price - diff, chg: (diff / (price - diff)) * 100, time: d.localTradedAt, live: true };
+      lastRegular[sym] = { ...regular, live: false, day: String(d.localTradedAt || "").slice(0, 10) };
+    }
   }
-  return { price, session, live, time, status, raw: { st, ms } };
+
+  let ext = null;
+  if ((st === "PRE_MARKET" || st === "AFTER_MARKET") && num(o.overPrice) && status !== "PREOPEN") {
+    ext = { price: num(o.overPrice), session: st === "PRE_MARKET" ? "pre" : "after", live: status === "OPEN", time: o.localTradedAt };
+  } else if (!regular && /after/i.test(ms) && num(d.closePriceRaw ?? d.closePrice)) {
+    // Before the next pre-market opens: the last after-market trade.
+    ext = { price: num(d.closePriceRaw ?? d.closePrice), session: "after", live: false, time: d.localTradedAt };
+  }
+  return { regular, ext };
 }
 
 async function snapshot() {
@@ -106,14 +119,19 @@ async function snapshot() {
   for (let i = 0; i < korean.length; i += 6) {
     await Promise.all(korean.slice(i, i + 6).map(async s => {
       try {
-        const x = await naverExt(s);
+        const { regular, ext } = await naver(s);
+        const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+        if (regular) quotes[s] = { ...(quotes[s] || {}), ...regular, src: "naver" };
+        else if (lastRegular[s] && lastRegular[s].day === today && quotes[s]) {
+          // KRX just closed and Yahoo may still be late: use the last real-time KRX price.
+          const y = quotes[s], l = lastRegular[s];
+          if (!y.time || y.time * 1000 < Date.parse(l.time)) quotes[s] = { ...y, price: l.price, prev: l.prev, chg: l.chg, live: false };
+        }
         const q = quotes[s];
-        // Compare with the last KRX close. After the 09:00 KST open, Yahoo's price is live, so a
-        // pre-market price is compared with the previous close.
-        const kst = new Date(Date.now() + 9 * 3600e3), kstMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
-        const ref = x.session === "pre" && kstMin >= 540 ? q?.prev : q?.price;
-        if (q && x.price && ref) quotes[s].ext = { ...x, ref, chg: (x.price / ref - 1) * 100 };
-        else if (q) quotes[s].ext = { ...x, chg: null };
+        if (q) q.krxLive = !!regular;
+        // The extended price is compared with the last KRX close.
+        if (q && ext && q.price) q.ext = { ...ext, ref: q.price, chg: (ext.price / q.price - 1) * 100 };
+        else if (q) delete q.ext;
       } catch (e) { errors.push(e.message); }
     }));
   }

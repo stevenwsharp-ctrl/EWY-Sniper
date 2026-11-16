@@ -53,6 +53,12 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .tick{color:var(--mute);font-size:12px}
 .wcell{min-width:130px}
 .ext .tick{font-size:11px}.ext.stale{opacity:.6}
+.lv{color:var(--up);font-weight:700}
+.hs{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.5px;padding:1px 5px;border-radius:4px;margin-left:4px;vertical-align:1px}
+.hs.on{background:var(--up);color:#04130a}.hs.off{background:var(--panel);color:var(--mute);border:1px solid var(--line)}
+.sessions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.sess{font-size:12px;padding:5px 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--mute)}
+.sess.on{color:var(--up);border-color:rgba(34,197,94,.5);background:rgba(34,197,94,.08);font-weight:700}
 .livedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--warn);box-shadow:0 0 6px var(--warn);margin-right:4px;vertical-align:1px}
 .wbar{display:flex;align-items:center;gap:8px;justify-content:flex-end}
 .wbar .track{width:70px;height:8px;background:var(--panel2);border-radius:4px;overflow:hidden}
@@ -165,17 +171,18 @@ td.l .name{cursor:pointer}
     <input id="search" placeholder="Filter by name or ticker…">
   </div>
 
+  <div class="sessions" id="sessions"></div>
   <div class="tablewrap">
     <table>
       <thead><tr>
-        <th class="l" data-k="rank">#</th>
-        <th class="l" data-k="name">Stock</th>
-        <th data-k="weight">% of EWY</th>
-        <th data-k="liveWeight">Live % of EWY</th>
-        <th data-k="price">Price (₩)</th>
-        <th data-k="chg">Today</th>
-        <th data-k="extChg" title="Nextrade pre-market (08:00–08:50 KST) and after-market (15:30–20:00 KST)">Pre / After</th>
-        <th data-k="contrib">EWY impact</th>
+        <th class="l" data-k="rank">#<span class="arr"></span></th>
+        <th class="l" data-k="name">Stock<span class="arr"></span></th>
+        <th data-k="weight" title="Weight in EWY from the holdings list">% of EWY<span class="arr"></span></th>
+        <th data-k="liveWeight" title="Weight in EWY after today's KRX moves">% of EWY now<span class="arr"></span></th>
+        <th data-k="price" title="KRX price. Regular session 09:00–15:30 KST">KRX price (₩) <span class="hs" id="hsKrx"></span><span class="arr"></span></th>
+        <th data-k="chg" title="KRX price compared with the previous KRX close">KRX change<span class="arr"></span></th>
+        <th data-k="extChg" title="Nextrade pre-market (08:00–08:50 KST) and after-hours (15:30–20:00 KST), compared with the last KRX close"><span id="hlExt">Pre / After-hours</span> <span class="hs" id="hsExt"></span><span class="arr"></span></th>
+        <th data-k="contrib" title="KRX change × % of EWY">EWY impact<span class="arr"></span></th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
@@ -442,7 +449,7 @@ function render(){
       <td class="l"><div class="name" data-sym="${esc(r.sym)}" title="Show news for this stock">${esc(r.name)}${newsBadge(r.sym)}</div><div class="tick">${esc(r.sym.replace(".KS"," · KRX"))}</div></td>
       <td class="wcell"><div class="wbar"><div class="track"><div class="fill" style="width:${(r.weight/maxW*100).toFixed(1)}%"></div></div><span class="wtag">${fmt(r.weight)}%</span></div></td>
       <td>${r.liveWeight != null ? fmt(r.liveWeight) + "%" : "—"}</td>
-      <td>${r.price != null ? fmt(r.price, 0) : "—"}</td>
+      <td><div>${r.price != null ? fmt(r.price, 0) : "—"}</div><div class="tick">${r.krxLive ? '<span class="lv">● live</span>' : (r.price != null ? "close" : "")}</div></td>
       <td class="${cls(r.chg)}">${pct(r.chg)}</td>
       ${extCell(r)}
       <td class="${cls(r.contrib)}">${r.contrib != null ? (r.contrib > 0 ? "+" : "") + r.contrib.toFixed(3) + "%" : "—"}</td>
@@ -451,9 +458,9 @@ function render(){
   rows.forEach(r => { if (r.price != null) lastPrice[r.sym] = r.price; });
   document.querySelectorAll("th[data-k]").forEach(th => {
     th.classList.toggle("sorted", th.dataset.k === sortKey);
-    const base = th.textContent.replace(/ [▲▼]$/,"");
-    th.textContent = base + (th.dataset.k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : "");
+    th.querySelector(".arr").textContent = th.dataset.k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : "";
   });
+  renderSessions();
 }
 
 function kstTime(t){
@@ -462,12 +469,29 @@ function kstTime(t){
 }
 function extCell(r){
   const x = r.ext;
-  if (!x || x.price == null) return `<td class="ext">—</td>`;
+  if (!x || x.price == null) return `<td class="ext" title="${r.krxLive ? "No pre-market or after-hours trading during the KRX regular session" : ""}">—</td>`;
   const name = x.session === "pre" ? "Pre-market" : "After-hours";
-  const label = x.live ? `<span class="livedot"></span>${name} live` : `${name} close · ${kstTime(x.time)}`;
+  const label = x.live ? `<span class="lv">● live</span> · ${name.toLowerCase()}` : `${name} close · ${kstTime(x.time)}`;
   // During the KRX regular session, the pre-market number is old. Show it dimmed.
   const stale = !x.live && x.session === "pre" && krxOpenNow();
   return `<td class="ext${stale ? " stale" : ""}"><div>${fmt(x.price,0)} <span class="${cls(x.chg)}">${pct(x.chg)}</span></div><div class="tick">${label}</div></td>`;
+}
+// One clear line: which market is open now.
+function renderSessions(){
+  const krxLive = rows.some(r => r.krxLive);
+  const pre = rows.some(r => r.ext && r.ext.live && r.ext.session === "pre");
+  const after = rows.some(r => r.ext && r.ext.live && r.ext.session === "after");
+  const u = partsIn("America/New_York"), uw = !["Sat","Sun"].includes(u.wd);
+  const usReg = uw && u.m >= 570 && u.m < 960, usExt = uw && ((u.m >= 240 && u.m < 570) || (u.m >= 960 && u.m < 1200));
+  const s = (on, txt) => `<span class="sess${on ? " on" : ""}">${on ? "● " : ""}${txt}</span>`;
+  $("sessions").innerHTML =
+    s(pre, "Korea pre-market " + (pre ? "LIVE" : "closed") + " · 08:00–08:50 KST") +
+    s(krxLive, "KRX regular " + (krxLive ? "LIVE" : "closed") + " · 09:00–15:30 KST") +
+    s(after, "Korea after-hours " + (after ? "LIVE" : "closed") + " · 15:30–20:00 KST") +
+    s(usReg || usExt, "EWY (US) " + (usReg ? "LIVE" : usExt ? "LIVE extended hours" : "closed"));
+  const hk = $("hsKrx"); hk.className = "hs " + (krxLive ? "on" : "off"); hk.textContent = krxLive ? "LIVE" : "CLOSED";
+  const he = $("hsExt"); he.className = "hs " + (pre || after ? "on" : "off"); he.textContent = pre || after ? "LIVE" : "CLOSED";
+  $("hlExt").textContent = pre ? "Pre-market" : after ? "After-hours" : "Pre / After-hours";
 }
 function krxOpenNow(){ const k = partsIn("Asia/Seoul"); return !["Sat","Sun"].includes(k.wd) && k.m >= 540 && k.m < 930; }
 
@@ -620,7 +644,7 @@ async function refresh(){
       sumW += w;
       if (q.chg != null){ sumWR += w * q.chg; coveredW += w; if (q.chg > 0) ups++; else if (q.chg < 0) downs++; }
       const ext = q.ext || null;
-      return { rank:i+1, sym:h[0], name:h[1], weight:w, price:q.price, chg:q.chg, contrib: q.chg != null ? w * q.chg / 100 : null,
+      return { rank:i+1, sym:h[0], name:h[1], weight:w, price:q.price, chg:q.chg, contrib: q.chg != null ? w * q.chg / 100 : null, krxLive: !!q.krxLive,
                ext, extChg: ext && ext.chg != null ? ext.chg : null };
     });
     const basketKrw = coveredW ? sumWR / coveredW : null;       // scaled to 100%
