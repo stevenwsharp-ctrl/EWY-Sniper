@@ -1,0 +1,28 @@
+name: Probe
+on:
+  push:
+    paths: [".github/workflows/probe.yml"]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cat > /tmp/c.mjs <<'JS'
+          const UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36";
+          const codes=["000660","005930","009150","005380","105560"];
+          for (let round=0; round<2; round++){
+            const t=new Date().toISOString();
+            const tv = await fetch("https://scanner.tradingview.com/korea/scan",{method:"POST",headers:{"User-Agent":UA,"Content-Type":"application/json"},body:JSON.stringify({symbols:{tickers:codes.map(c=>"KRX:"+c)},columns:["close","change","open","update_mode","exchange"]})}).then(r=>r.json()).catch(e=>({err:e.message}));
+            const ewy = await fetch("https://scanner.tradingview.com/america/scan",{method:"POST",headers:{"User-Agent":UA,"Content-Type":"application/json"},body:JSON.stringify({symbols:{tickers:["AMEX:EWY","NYSE:EWY"]},columns:["close","change","update_mode"]})}).then(r=>r.json()).catch(e=>({err:e.message}));
+            console.log("TIME",t,"TV EWY",JSON.stringify(ewy.data||ewy));
+            for (const c of codes){
+              const n=(await fetch(`https://polling.finance.naver.com/api/realtime/domestic/stock/${c}`,{headers:{"User-Agent":UA}}).then(r=>r.json())).datas[0];
+              const o=n.overMarketPriceInfo||{};
+              const y=(await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${c}.KS?range=1d&interval=1m`,{headers:{"User-Agent":UA}}).then(r=>r.json())).chart.result[0].meta;
+              const tvr=(tv.data||[]).find(d=>d.s==="KRX:"+c);
+              console.log(c,"| naverKRX",n.closePriceRaw,n.fluctuationsRatioRaw+"%",n.localTradedAt?.slice(11,19),"| naverNXT",o.tradingSessionType,o.overPrice,o.fluctuationsRatio+"%",o.localTradedAt?.slice(11,19),"| yahoo",y.regularMarketPrice,"age",Math.round(Date.now()/1000-y.regularMarketTime)+"s","| TV",tvr?JSON.stringify(tvr.d):JSON.stringify(tv).slice(0,150));
+            }
+            await new Promise(r=>setTimeout(r,20000));
+          }
+          JS
+          node /tmp/c.mjs
