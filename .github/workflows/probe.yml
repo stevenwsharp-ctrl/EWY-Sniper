@@ -1,0 +1,12 @@
+name: Probe
+on:
+  push:
+    paths: [".github/workflows/probe.yml"]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          D=$(TZ=Asia/Seoul date +%Y%m%d)
+          for u in "https://api.stock.naver.com/chart/domestic/item/000660/minute" "https://api.stock.naver.com/chart/domestic/item/000660/minute?startDateTime=${D}0800&endDateTime=${D}2000" "https://fchart.stock.naver.com/siseJson.nhn?symbol=000660&requestType=1&startTime=${D}&endTime=${D}&timeframe=minute" "https://api.stock.naver.com/chart/domestic/item/000660/minute1" "https://m.stock.naver.com/front-api/chart/pricesByPeriod?reutersCode=000660&category=day&chartInfoType=item&adjustmentType=Y"; do
+            echo "=== $u"; curl -sS -m 20 -A "Mozilla/5.0" -w "\nHTTP %{http_code} bytes %{size_download}\n" "$u" -o /tmp/b; head -c 500 /tmp/b; echo; tail -c 300 /tmp/b; echo; done
