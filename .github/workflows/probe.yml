@@ -1,0 +1,11 @@
+name: Probe
+on:
+  push:
+    paths: [".github/workflows/probe.yml"]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sS -A "Mozilla/5.0" "https://polling.finance.naver.com/api/realtime/domestic/stock/000660" | python3 -c "import json,sys;d=json.load(sys.stdin)['datas'][0];print({k:d.get(k) for k in ['closePriceRaw','compareToPreviousClosePriceRaw','fluctuationsRatioRaw','marketStatus','marketSessionType','localTradedAt']});print(d.get('overMarketPriceInfo'))"
+          curl -sS -A "Mozilla/5.0" "https://query1.finance.yahoo.com/v8/finance/chart/000660.KS?range=1d&interval=1m" | python3 -c "import json,sys,time;m=json.load(sys.stdin)['chart']['result'][0]['meta'];print('yahoo',m['regularMarketPrice'],m.get('previousClose'),m.get('chartPreviousClose'),'age min',(time.time()-m['regularMarketTime'])/60)"
